@@ -44,7 +44,7 @@ The structured value a Step emits on stdout alongside its exit code, piped to th
 _Avoid_: Actor message, mailbox, event, payload, pipe.
 
 **Entry Step**:
-The single start node of a Workflow, where a Frame begins execution.
+The single start node of a Workflow, where a Frame begins execution. Its in-Message is the Workflow's arguments, supplied by the Run's initiator (empty if none) — the symmetric counterpart to an Exit Gate's out-Message being the Workflow's return value.
 _Avoid_: Start state, root, head.
 
 **Name scope**:
