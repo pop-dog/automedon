@@ -65,7 +65,10 @@ The `kernel` crate (the correctness-critical engine) is the coverage target;
 the uncovered remainder is the deliberate `panic!` paths for malformed input and
 the console Sink's rendering glue.
 
-## Slice ladder (next)
+## What's next
+
+The Kernel is built as a sequence of thin, end-to-end vertical slices. The next
+ones, in order:
 
 - **Slice 2** — Composite Steps → the Frame *stack*, Depth cap, Exit Gate
   surfacing the child exit code to the parent.
@@ -73,3 +76,6 @@ the console Sink's rendering glue.
   Depth-overflow abort.
 - **Slice 4** — the full scenario (code⇄review nested in build⇄e2e), with the
   LLM adapter and Sink graduated to their own crates.
+
+See [`docs/roadmap.md`](docs/roadmap.md) for each slice's goal, what it
+exercises, and its done-definition, plus cross-cutting deferred work.
