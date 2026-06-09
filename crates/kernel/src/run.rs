@@ -118,3 +118,224 @@ fn invoke(step: &Step, in_message: &[u8]) -> (i32, Vec<u8>) {
     let code = output.status.code().unwrap_or(-1);
     (code, output.stdout)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::run;
+    use crate::event::{Event, Fault};
+    use crate::ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
+    use crate::Sink;
+
+    /// A Sink that records every emitted Event for inspection.
+    #[derive(Default)]
+    struct MockSink {
+        events: Vec<Event>,
+    }
+
+    impl Sink for MockSink {
+        fn emit(&mut self, event: &Event) {
+            self.events.push(event.clone());
+        }
+    }
+
+    fn gate(key: GateKey, target: GateTarget) -> Gate {
+        Gate { key, target, when: None }
+    }
+
+    fn step(command: &str, budget: Option<u32>, gates: Vec<Gate>) -> Step {
+        Step { command: command.into(), budget, gates }
+    }
+
+    fn workflow(entry: &str, default_budget: Option<u32>, steps: Vec<(&str, Step)>) -> Workflow {
+        Workflow {
+            entry: entry.into(),
+            default_budget,
+            steps: steps.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        }
+    }
+
+    fn entered(sink: &MockSink) -> usize {
+        sink.events.iter().filter(|e| matches!(e, Event::StepEntered { .. })).count()
+    }
+
+    /// A single self-looping Step that always fails, used to exercise the Budget.
+    fn looping_workflow(default_budget: Option<u32>, step_budget: Option<u32>) -> Workflow {
+        workflow(
+            "loop",
+            default_budget,
+            vec![(
+                "loop",
+                step(
+                    "exit 1",
+                    step_budget,
+                    vec![
+                        gate(GateKey::Default, GateTarget::Step("loop".into())),
+                        gate(GateKey::Exhausted, GateTarget::Exit(0)),
+                    ],
+                ),
+            )],
+        )
+    }
+
+    #[test]
+    fn code_gate_takes_precedence_over_default() {
+        let wf = workflow(
+            "s",
+            None,
+            vec![(
+                "s",
+                step(
+                    "exit 0",
+                    None,
+                    vec![
+                        gate(GateKey::Code(0), GateTarget::Exit(10)),
+                        gate(GateKey::Default, GateTarget::Exit(99)),
+                    ],
+                ),
+            )],
+        );
+        let mut sink = MockSink::default();
+        assert_eq!(run(&wf, &mut sink).unwrap(), 10);
+    }
+
+    #[test]
+    fn default_gate_catches_unmatched_integer() {
+        let wf = workflow(
+            "s",
+            None,
+            vec![(
+                "s",
+                step(
+                    "exit 5",
+                    None,
+                    vec![
+                        gate(GateKey::Code(0), GateTarget::Exit(10)),
+                        gate(GateKey::Default, GateTarget::Exit(99)),
+                    ],
+                ),
+            )],
+        );
+        let mut sink = MockSink::default();
+        assert_eq!(run(&wf, &mut sink).unwrap(), 99);
+    }
+
+    #[test]
+    fn exhaustion_routes_after_exactly_budget_activations() {
+        let wf = workflow(
+            "loop",
+            None,
+            vec![(
+                "loop",
+                step(
+                    "exit 1",
+                    Some(3),
+                    vec![
+                        gate(GateKey::Code(0), GateTarget::Exit(0)),
+                        gate(GateKey::Default, GateTarget::Step("loop".into())),
+                        gate(GateKey::Exhausted, GateTarget::Exit(42)),
+                    ],
+                ),
+            )],
+        );
+        let mut sink = MockSink::default();
+        assert_eq!(run(&wf, &mut sink).unwrap(), 42);
+
+        // The Step runs exactly Budget times, then Exhaustion fires once.
+        assert_eq!(entered(&sink), 3);
+        assert_eq!(
+            sink.events.iter().filter(|e| matches!(e, Event::Exhausted { .. })).count(),
+            1
+        );
+
+        // Budget decrements to zero across the activations.
+        let remaining: Vec<u32> = sink
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::BudgetConsumed { remaining, .. } => Some(*remaining),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(remaining, vec![2, 1, 0]);
+    }
+
+    #[test]
+    fn unmapped_exit_code_raises_unhandled_outcome() {
+        let wf = workflow(
+            "s",
+            None,
+            vec![("s", step("exit 7", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+        let mut sink = MockSink::default();
+        match run(&wf, &mut sink) {
+            Err(Fault::UnhandledOutcome { step, code }) => {
+                assert_eq!(step, "s");
+                assert_eq!(code, 7);
+            }
+            other => panic!("expected UnhandledOutcome, got {other:?}"),
+        }
+        // The Fault is announced on the Event stream before it is returned.
+        assert!(sink.events.iter().any(|e| matches!(e, Event::FaultRaised { .. })));
+    }
+
+    #[test]
+    fn spent_budget_without_exhausted_gate_raises_fault() {
+        let wf = workflow(
+            "loop",
+            None,
+            vec![(
+                "loop",
+                step("exit 1", Some(2), vec![gate(GateKey::Default, GateTarget::Step("loop".into()))]),
+            )],
+        );
+        let mut sink = MockSink::default();
+        match run(&wf, &mut sink) {
+            Err(Fault::UnhandledExhaustion { step }) => assert_eq!(step, "loop"),
+            other => panic!("expected UnhandledExhaustion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn budget_cascade_prefers_step_then_workflow_then_default() {
+        // Step Budget overrides the Workflow default.
+        let mut sink = MockSink::default();
+        run(&looping_workflow(Some(5), Some(2)), &mut sink).unwrap();
+        assert_eq!(entered(&sink), 2);
+
+        // Workflow default applies when the Step has no Budget.
+        let mut sink = MockSink::default();
+        run(&looping_workflow(Some(3), None), &mut sink).unwrap();
+        assert_eq!(entered(&sink), 3);
+
+        // The hardcoded default applies when neither is set.
+        let mut sink = MockSink::default();
+        run(&looping_workflow(None, None), &mut sink).unwrap();
+        assert_eq!(entered(&sink), DEFAULT_BUDGET as usize);
+    }
+
+    #[test]
+    fn message_is_piped_to_successor_stdin() {
+        // `emit` writes "5" to stdout; `consume` exits with the number it reads
+        // from stdin, so reaching exit 0 proves the Message arrived intact.
+        let wf = workflow(
+            "emit",
+            None,
+            vec![
+                ("emit", step("echo 5", None, vec![gate(GateKey::Code(0), GateTarget::Step("consume".into()))])),
+                (
+                    "consume",
+                    step(
+                        "read n; exit \"$n\"",
+                        None,
+                        vec![
+                            gate(GateKey::Code(5), GateTarget::Exit(0)),
+                            gate(GateKey::Default, GateTarget::Exit(1)),
+                        ],
+                    ),
+                ),
+            ],
+        );
+        let mut sink = MockSink::default();
+        assert_eq!(run(&wf, &mut sink).unwrap(), 0);
+    }
+}

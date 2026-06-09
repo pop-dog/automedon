@@ -42,6 +42,29 @@ crates/orchestrator/   bin: serde_yaml loader + console Sink + main().
 examples/              example Workflows.
 ```
 
+## Testing
+
+```sh
+cargo test
+```
+
+The run-loop tests (gate routing, the Budget cascade, Exhaustion, Faults,
+Message piping) live in `crates/kernel`; the YAML-parsing tests live in
+`crates/orchestrator`, keeping the Kernel free of any format dependency.
+
+Coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov):
+
+```sh
+rustup component add llvm-tools-preview   # one-time
+cargo install cargo-llvm-cov              # one-time
+cargo llvm-cov                            # summary table
+cargo llvm-cov --html --open             # browsable line-by-line report
+```
+
+The `kernel` crate (the correctness-critical engine) is the coverage target;
+the uncovered remainder is the deliberate `panic!` paths for malformed input and
+the console Sink's rendering glue.
+
 ## Slice ladder (next)
 
 - **Slice 2** — Composite Steps → the Frame *stack*, Depth cap, Exit Gate
