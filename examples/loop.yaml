@@ -1,0 +1,34 @@
+# A flat Workflow demonstrating a Budget-bounded self-loop, Message passing,
+# integer + Default + EXHAUSTED routing, and an Exit Gate.
+#
+#   greet  : emits a Message, exits 0 -> retry
+#   retry  : echoes the Message it received (proving stdin pipe), always fails
+#            (exit 1) -> Default Gate loops back to itself. Budget 3, so after 3
+#            activations it Exhausts -> EXIT 42.
+#
+# Run:  cargo run -p orchestrator -- examples/loop.yaml ; echo "exit=$?"
+
+entry: greet
+default_budget: 10
+
+steps:
+  greet:
+    command: 'echo ''{"attempt": 0}'''
+    gates:
+      - key: 0
+        target: { step: retry }
+        when: greeting emitted
+
+  retry:
+    command: 'cat; echo "  (retry saw the message above) " >&2; exit 1'
+    budget: 3
+    gates:
+      - key: 0
+        target: { exit: 0 }
+        when: success
+      - key: "*"
+        target: { step: retry }
+        when: any failure — loop and try again
+      - key: EXHAUSTED
+        target: { exit: 42 }
+        when: gave up after the Budget was spent

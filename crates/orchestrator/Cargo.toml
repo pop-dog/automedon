@@ -1,0 +1,15 @@
+[package]
+name = "orchestrator"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The bin depends on the kernel, never the reverse (ADR-0003). serde_yaml — the
+# concrete format — lives HERE, not in the kernel.
+[dependencies]
+kernel = { path = "../kernel" }
+serde_yaml = "0.9"
+
+[[bin]]
+name = "orchestrator"
+path = "src/main.rs"

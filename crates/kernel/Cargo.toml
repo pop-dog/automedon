@@ -1,0 +1,10 @@
+[package]
+name = "kernel"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Depends on serde for derive only — serde is format-agnostic; the concrete
+# format (YAML) lives in `orchestrator`, keeping the Kernel format-independent.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
