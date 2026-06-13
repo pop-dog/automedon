@@ -11,11 +11,12 @@ use crate::Sink;
 
 /// Run a flat Workflow to an Exit Gate, emitting Events to `sink`.
 ///
-/// Returns the Workflow exit code, or the Fault that prevented reaching an Exit
-/// Gate. Panics on malformed input (a Gate/entry pointing at a missing Step, or
-/// a command that fails to spawn) — those are setup bugs, not model Faults, and
-/// are not validated here.
-pub fn run(workflow: &Workflow, sink: &mut dyn Sink) -> Result<i32, Fault> {
+/// `initial_message` seeds the entry Step's in-Message, letting a Run carry
+/// arguments; pass `&[]` for no input. Returns the Workflow exit code, or the
+/// Fault that prevented reaching an Exit Gate. Panics on malformed input (a
+/// Gate/entry pointing at a missing Step, or a command that fails to spawn) —
+/// those are setup bugs, not model Faults, and are not validated here.
+pub fn run(workflow: &Workflow, initial_message: &[u8], sink: &mut dyn Sink) -> Result<i32, Fault> {
     sink.emit(&Event::RunStarted);
 
     // The Frame: per-Step remaining Budget, resolved by the cascade up front.
@@ -32,7 +33,7 @@ pub fn run(workflow: &Workflow, sink: &mut dyn Sink) -> Result<i32, Fault> {
         .collect();
 
     let mut current: &str = &workflow.entry;
-    let mut message: Vec<u8> = Vec::new();
+    let mut message: Vec<u8> = initial_message.to_vec();
 
     loop {
         let step = workflow
@@ -195,7 +196,7 @@ mod tests {
             )],
         );
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &mut sink).unwrap(), 10);
+        assert_eq!(run(&wf, &[], &mut sink).unwrap(), 10);
     }
 
     #[test]
@@ -216,7 +217,7 @@ mod tests {
             )],
         );
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &mut sink).unwrap(), 99);
+        assert_eq!(run(&wf, &[], &mut sink).unwrap(), 99);
     }
 
     #[test]
@@ -238,7 +239,7 @@ mod tests {
             )],
         );
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &mut sink).unwrap(), 42);
+        assert_eq!(run(&wf, &[], &mut sink).unwrap(), 42);
 
         // The Step runs exactly Budget times, then Exhaustion fires once.
         assert_eq!(entered(&sink), 3);
@@ -267,7 +268,7 @@ mod tests {
             vec![("s", step("exit 7", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
         );
         let mut sink = MockSink::default();
-        match run(&wf, &mut sink) {
+        match run(&wf, &[], &mut sink) {
             Err(Fault::UnhandledOutcome { step, code }) => {
                 assert_eq!(step, "s");
                 assert_eq!(code, 7);
@@ -289,7 +290,7 @@ mod tests {
             )],
         );
         let mut sink = MockSink::default();
-        match run(&wf, &mut sink) {
+        match run(&wf, &[], &mut sink) {
             Err(Fault::UnhandledExhaustion { step }) => assert_eq!(step, "loop"),
             other => panic!("expected UnhandledExhaustion, got {other:?}"),
         }
@@ -299,17 +300,17 @@ mod tests {
     fn budget_cascade_prefers_step_then_workflow_then_default() {
         // Step Budget overrides the Workflow default.
         let mut sink = MockSink::default();
-        run(&looping_workflow(Some(5), Some(2)), &mut sink).unwrap();
+        run(&looping_workflow(Some(5), Some(2)), &[], &mut sink).unwrap();
         assert_eq!(entered(&sink), 2);
 
         // Workflow default applies when the Step has no Budget.
         let mut sink = MockSink::default();
-        run(&looping_workflow(Some(3), None), &mut sink).unwrap();
+        run(&looping_workflow(Some(3), None), &[], &mut sink).unwrap();
         assert_eq!(entered(&sink), 3);
 
         // The hardcoded default applies when neither is set.
         let mut sink = MockSink::default();
-        run(&looping_workflow(None, None), &mut sink).unwrap();
+        run(&looping_workflow(None, None), &[], &mut sink).unwrap();
         assert_eq!(entered(&sink), DEFAULT_BUDGET as usize);
     }
 
@@ -336,6 +337,29 @@ mod tests {
             ],
         );
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &mut sink).unwrap(), 0);
+        assert_eq!(run(&wf, &[], &mut sink).unwrap(), 0);
+    }
+
+    #[test]
+    fn initial_message_seeds_entry_step_stdin() {
+        // The entry Step exits with the number it reads from stdin, so reaching
+        // exit 0 proves the seeded initial Message arrived at the entry Step.
+        let wf = workflow(
+            "entry",
+            None,
+            vec![(
+                "entry",
+                step(
+                    "read n; exit \"$n\"",
+                    None,
+                    vec![
+                        gate(GateKey::Code(5), GateTarget::Exit(0)),
+                        gate(GateKey::Default, GateTarget::Exit(1)),
+                    ],
+                ),
+            )],
+        );
+        let mut sink = MockSink::default();
+        assert_eq!(run(&wf, b"5", &mut sink).unwrap(), 0);
     }
 }
