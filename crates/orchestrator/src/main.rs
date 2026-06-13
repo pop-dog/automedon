@@ -239,4 +239,37 @@ steps:
         assert_eq!(a.budget, Some(2));
         assert_eq!(a.gates.len(), 2);
     }
+
+    // Guards the shipped coder example: parsing it and asserting its routing
+    // keeps the file honest without invoking the LLM Steps it names.
+    #[test]
+    fn coder_example_wires_the_review_loop() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/coder.yaml");
+        let text = std::fs::read_to_string(path).unwrap();
+        let wf: Workflow = serde_yaml::from_str(&text).unwrap();
+
+        // Resolve the target a Step routes to for a given Gate key.
+        let target = |step: &str, key: GateKey| -> GateTarget {
+            wf.steps[step]
+                .gates
+                .iter()
+                .find(|g| g.key == key)
+                .unwrap_or_else(|| panic!("{step} has no gate for {key:?}"))
+                .target
+                .clone()
+        };
+        let routes_to_step = |t: GateTarget, name: &str| matches!(t, GateTarget::Step(s) if s == name);
+        let exits_with = |t: GateTarget, code: i32| matches!(t, GateTarget::Exit(c) if c == code);
+
+        assert_eq!(wf.entry, "code");
+        // The loop is bounded by code's Budget; exhausting it escalates.
+        assert_eq!(wf.steps["code"].budget, Some(3));
+        assert!(routes_to_step(target("code", GateKey::Code(0)), "review"));
+        assert!(exits_with(target("code", GateKey::Exhausted), 90));
+        // Review approves forward to commit, or sends a Blocking verdict back to code.
+        assert!(routes_to_step(target("review", GateKey::Code(0)), "commit"));
+        assert!(routes_to_step(target("review", GateKey::Code(1)), "code"));
+        // Commit terminates the Run.
+        assert!(exits_with(target("commit", GateKey::Code(0)), 0));
+    }
 }
