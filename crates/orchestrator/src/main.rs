@@ -1,6 +1,10 @@
 //! Driver: wires a YAML WorkflowSource and a console Sink into the Kernel.
-//! Usage: `orchestrator <workflow.yaml>`.
+//! Usage: `orchestrator <workflow.yaml> [--message <text>]`.
+//!
+//! The initial Message seeds the entry Step. It comes from `--message` or piped
+//! stdin (the flag wins); with no `--message` and nothing piped, it is empty.
 
+use std::io::Read;
 use std::path::PathBuf;
 
 use kernel::{Event, Fault, GateKey, GateTarget, Sink, Workflow, WorkflowSource};
@@ -80,11 +84,32 @@ fn fmt_fault(fault: &Fault) -> String {
     }
 }
 
+/// Resolve the Run's initial Message from the two CLI input channels. The
+/// `--message` flag wins over piped stdin; with neither present the Message is
+/// empty, preserving a Run invoked without arguments. Kept pure (no argv/stdin
+/// access) so the precedence rules are unit-testable.
+fn resolve_initial_message(flag: Option<String>, stdin: Option<Vec<u8>>) -> Vec<u8> {
+    match (flag, stdin) {
+        (Some(text), _) => text.into_bytes(),
+        (None, Some(bytes)) => bytes,
+        (None, None) => Vec::new(),
+    }
+}
+
+/// Pull the value of `--message <text>` out of the argument list, if present.
+fn message_flag(args: &[String]) -> Option<String> {
+    args.iter()
+        .position(|a| a == "--message")
+        .and_then(|i| args.get(i + 1).cloned())
+}
+
 fn main() {
-    let path = match std::env::args().nth(1) {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    let path = match args.first() {
         Some(p) => PathBuf::from(p),
         None => {
-            eprintln!("usage: orchestrator <workflow.yaml>");
+            eprintln!("usage: orchestrator <workflow.yaml> [--message <text>]");
             std::process::exit(2);
         }
     };
@@ -95,8 +120,19 @@ fn main() {
         std::process::exit(2);
     });
 
+    // Read stdin only when it is piped or redirected; a terminal stdin would
+    // block on an end-of-file that never arrives.
+    let piped_stdin = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        None
+    } else {
+        let mut buf = Vec::new();
+        std::io::stdin().read_to_end(&mut buf).ok().map(|_| buf)
+    };
+
+    let initial_message = resolve_initial_message(message_flag(&args), piped_stdin);
+
     let mut sink = ConsoleSink;
-    match kernel::run(&workflow, &mut sink) {
+    match kernel::run(&workflow, &initial_message, &mut sink) {
         Ok(code) => std::process::exit(code),
         // A Fault is not an exit code; surface it on a distinct status (sysexits EX_SOFTWARE).
         Err(_) => std::process::exit(70),
@@ -107,7 +143,48 @@ fn main() {
 // in the format-agnostic Kernel.
 #[cfg(test)]
 mod tests {
+    use super::{message_flag, resolve_initial_message};
     use kernel::{GateKey, GateTarget, Workflow};
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn message_flag_reads_the_following_value() {
+        let got = message_flag(&args(&["wf.yaml", "--message", "hello"]));
+        assert_eq!(got.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn message_flag_absent_yields_none() {
+        assert_eq!(message_flag(&args(&["wf.yaml"])), None);
+    }
+
+    #[test]
+    fn dangling_message_flag_yields_none() {
+        // A trailing `--message` with no value is treated as absent, falling back
+        // to stdin or the empty default rather than erroring.
+        assert_eq!(message_flag(&args(&["wf.yaml", "--message"])), None);
+    }
+
+    #[test]
+    fn flag_wins_over_stdin() {
+        let got = resolve_initial_message(Some("from-flag".into()), Some(b"from-stdin".to_vec()));
+        assert_eq!(got, b"from-flag");
+    }
+
+    #[test]
+    fn stdin_used_when_flag_absent() {
+        let got = resolve_initial_message(None, Some(b"from-stdin".to_vec()));
+        assert_eq!(got, b"from-stdin");
+    }
+
+    #[test]
+    fn empty_when_both_absent() {
+        let got = resolve_initial_message(None, None);
+        assert!(got.is_empty());
+    }
 
     #[test]
     fn parses_every_gate_key_form() {
