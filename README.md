@@ -1,45 +1,109 @@
 # Agent Orchestrator
 
 A framework for defining and executing developer workflows as a directed
-control-flow graph of executable Steps. The graph is LLM-independent; Steps can
-invoke anything that exits with an integer (a shell script, a binary, or an LLM
-agent). See [`CONTEXT.md`](CONTEXT.md) for the vocabulary and
-[`docs/adr/`](docs/adr/) for the architectural decisions.
+control-flow graph of executable Steps — LLM-independent, total, and observable.
 
-The Kernel is implemented in **Rust** (ADR-0006).
+![language: Rust](https://img.shields.io/badge/language-Rust-orange)
+![edition: 2021](https://img.shields.io/badge/edition-2021-blue)
+![built with: cargo](https://img.shields.io/badge/built%20with-cargo-brightgreen)
+![status: pre--1.0](https://img.shields.io/badge/status-pre--1.0-yellow)
 
-## Status: slice 1 (tracer bullet)
+## Contents
 
-The first vertical slice is a deliberately scrappy end-to-end path that proves
-the novel part of the engine — **Budget-bounded looping (totality)** — wired all
-the way from a YAML file through the run loop to a console trace.
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Installation / Quick Start](#installation--quick-start)
+- [Usage](#usage)
+- [Crate layout](#crate-layout)
+- [Testing](#testing)
+- [Roadmap](#roadmap)
+- [Configuration](#configuration)
+- [Contributing](#contributing)
+- [License](#license)
 
-What slice 1 does:
+## Overview
 
-- Loads a Workflow from YAML (the first `WorkflowSource`, ADR-0007).
-- Runs **one flat Frame** (Depth 0, no nesting yet).
-- Invokes Steps as subprocesses (`sh -c`, cwd inherited), piping stdout→stdin as
-  the Message.
-- Routes the exit code through Gates: `integer | * | EXHAUSTED | EXIT`.
-- Enforces a per-Step **Budget** and the **EXHAUSTED** Gate.
-- Raises an **unhandled-outcome Fault** that aborts the Run with a diagnostic.
-- Emits **Events** to a console Sink.
+Agent Orchestrator runs developer workflows expressed as a graph of Steps, where
+each Step can invoke anything that exits with an integer — a shell script, a
+binary, or an LLM agent. The graph is LLM-independent: control flow is driven by
+exit codes routed through Gates, not by any model's reasoning. Its defining
+property is **totality** — every Run terminates, because every loop is bounded by
+a Budget and the engine routes a spent Budget through an explicit `EXHAUSTED`
+Gate rather than spinning forever. The Kernel is a microkernel implemented in
+Rust ([ADR-0006](docs/adr/0006-kernel-implemented-in-rust.md)); the domain
+vocabulary lives in [`CONTEXT.md`](CONTEXT.md) and the architectural decisions in
+[`docs/adr/`](docs/adr/).
 
-### Run it
+## Key Features
+
+- **Language-agnostic Steps.** A Step is any subprocess; the engine pipes one
+  Step's stdout into the next as the Message and routes its exit code.
+- **Budget-bounded looping (totality).** Every loop carries a Budget; a spent
+  Budget takes the `EXHAUSTED` Gate, so a Run can never hang.
+- **Exit-code routing through Gates.** Outcomes are matched against
+  `integer | * | EXHAUSTED | EXIT` Gates to decide the next Step or return value.
+- **Workflow arguments and return values.** A Run is seeded with an initial
+  Message (`--message` or stdin); an Exit Gate's out-Message is the return value.
+- **Faults as diagnostics.** An unhandled outcome raises a Fault that aborts the
+  Run with a clear diagnostic rather than failing silently.
+- **Observability as an Event stream.** The run loop emits Events to a Sink (a
+  console trace today), keeping the engine decoupled from output.
+- **Flagship agentic coder.** `examples/coder.yaml` is a runnable `code → review
+  → commit` loop of bespoke `claude -p` LLM Steps that writes code for this repo.
+
+## Installation / Quick Start
+
+Requires a [Rust toolchain](https://rustup.rs/) (edition 2021) with `cargo`.
+
+```sh
+git clone https://github.com/pop-dog/agent-orchestrator.git
+cd agent-orchestrator
+cargo build
+```
+
+Run the totality demo — a Workflow that loops a failing Step 3 times (its
+Budget), then takes the `EXHAUSTED` Gate to `EXIT 42`, proving the engine is
+total:
 
 ```sh
 cargo run -p orchestrator -- examples/loop.yaml ; echo "exit=$?"
 ```
 
-`examples/loop.yaml` loops a failing Step 3 times (its Budget), then takes the
-EXHAUSTED Gate to `EXIT 42` — demonstrating that the engine is total.
+## Usage
+
+Point the `orchestrator` binary at a Workflow YAML file and, optionally, seed the
+entry Step with an initial Message:
+
+```sh
+cargo run -p orchestrator -- <workflow.yaml> --message "<text>"
+```
+
+The flagship example, [`examples/coder.yaml`](examples/coder.yaml), is an
+agentic coder: a flat `code → review → commit` Workflow whose three Steps are
+bespoke `claude -p` LLM agents. The entry Message is the path to a `TASK.md`
+file; the `code ⇄ review` loop is Budget-bounded, and on non-convergence the
+`EXHAUSTED` Gate escalates with `EXIT 90`, leaving the unstaged changes and
+findings for a human. Run it from the repo root:
+
+```sh
+cargo run -p orchestrator -- examples/coder.yaml --message ./TASK.md
+```
+
+Each LLM Step runs under a least-privilege scoped permission policy
+(`examples/coder/*.permissions.json`). The Steps expect `claude` (and `cargo`,
+for the build check) on `PATH`.
 
 ## Crate layout
 
-```
-crates/kernel/         lib: IR types, WorkflowSource + Sink traits, the run loop. (Modules depend on it, never the reverse.)
+This is a Cargo workspace (edition 2021). Dependency arrows point only at
+`kernel` — it is depended on but never depends back
+([ADR-0003](docs/adr/0003-microkernel-architecture.md)).
+
+```text
+crates/kernel/         lib: IR types, WorkflowSource + Sink traits, the run loop.
 crates/orchestrator/   bin: serde_yaml loader + console Sink + main().
-examples/              example Workflows.
+examples/              example Workflows (loop.yaml, coder.yaml).
+docs/                  ADRs, conventions, and developer docs.
 ```
 
 ## Testing
@@ -48,39 +112,32 @@ examples/              example Workflows.
 cargo test
 ```
 
-The run-loop tests (gate routing, the Budget cascade, Exhaustion, Faults,
-Message piping) live in `crates/kernel`; the YAML-parsing tests live in
-`crates/orchestrator`, keeping the Kernel free of any format dependency.
+For line-coverage instructions and what the engine covers, see
+[docs/coverage.md](docs/coverage.md).
 
-Coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov):
+## Roadmap
 
-```sh
-rustup component add llvm-tools-preview   # one-time
-cargo install cargo-llvm-cov              # one-time
-cargo llvm-cov                            # summary table
-cargo llvm-cov --html --open             # browsable line-by-line report
-```
+The plan and the current status of each vertical slice are tracked as GitHub
+issues grouped under the [`v0.1` milestone](https://github.com/pop-dog/agent-orchestrator/milestones).
 
-The `kernel` crate (the correctness-critical engine) is the coverage target;
-the uncovered remainder is the deliberate `panic!` paths for malformed input and
-the console Sink's rendering glue.
+## Configuration
 
-## What's next
+Workflows are authored as YAML — see the annotated
+[`examples/loop.yaml`](examples/loop.yaml) and
+[`examples/coder.yaml`](examples/coder.yaml) for the Step, Gate, and Budget
+schema. The authoritative vocabulary for every term (Step, Gate, Budget, Frame,
+Message, Fault, Sink) is defined in [`CONTEXT.md`](CONTEXT.md).
 
-The Kernel is built as a sequence of thin, end-to-end vertical slices. The next
-ones, in order:
+## Contributing
 
-- **Slice 2** — Initial Message: invoke a Run with input, so a Workflow takes
-  arguments (the entry Step's in-Message).
-- **Slice 3** — Agentic coder example: a `code ⇄ review → commit` Workflow of
-  bespoke LLM Steps that writes code for this repo (first dogfood).
-- **Slice 4** — Composite Steps → the Frame *stack*, Depth cap, Exit Gate
-  surfacing the child exit code to the parent.
-- **Slice 5** — `FAULT` Gate catching + Fault propagation up the Frame stack;
-  Depth-overflow abort.
-- **Slice 6** — Capstone: extract the LLM Module, graduate Sinks to their own
-  crate, upgrade the coder to the nested code⇄review-in-build⇄e2e form.
+Contributions are welcome. The project follows Conventional Commits for commit
+subjects and targets 60% test coverage; please read [`CONTEXT.md`](CONTEXT.md)
+for the domain vocabulary and the [milestones](https://github.com/pop-dog/agent-orchestrator/milestones)
+for where the work is headed before opening a pull request. New work lands as thin, end-to-end
+vertical slices, each covered by tests.
 
-See [`docs/roadmap.md`](docs/roadmap.md) for each slice's goal, what it
-exercises, and its done-definition, plus the example-Workflow conventions and
-cross-cutting deferred work.
+## License
+
+This project is not yet licensed. No license has been chosen, so all rights are
+reserved by the authors pending a license decision; it is published for reference
+and not yet offered under open-source terms.
