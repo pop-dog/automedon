@@ -11,7 +11,7 @@ authoritative model lives in [`CONTEXT.md`](../CONTEXT.md) (vocabulary) and
 [`docs/adr/`](adr/) (decisions). Where a slice cites a term (Frame, Budget,
 Fault, …) it is using it exactly as `CONTEXT.md` defines it.
 
-Status legend: ✅ done · ◻ planned.
+Status legend: ✅ done · 📋 tracked as an issue · ◻ planned.
 
 > **Note on ordering.** Slices 2–3 (initial Message, then a real agentic-coder
 > example) were pulled ahead of Composite/Faults so dogfooding starts early: a
@@ -38,7 +38,9 @@ runs to `EXIT 42`.
 
 ---
 
-## Slice 2 — Initial Message (Workflow arguments) ◻
+## Slice 2 — Initial Message (Workflow arguments) 📋
+
+> Migrated to [issue #1](https://github.com/pop-dog/agent-orchestrator/issues/1).
 
 **Goal.** Let a Run be invoked *with* an input Message, so a Workflow can take
 arguments. (Today the entry Step always receives an empty Message.)
@@ -58,7 +60,10 @@ receives it; omitting it preserves today's empty-Message behaviour.
 
 ---
 
-## Slice 3 — Agentic coder example Workflow ◻
+## Slice 3 — Agentic coder example Workflow 📋
+
+> Migrated to [issue #2](https://github.com/pop-dog/agent-orchestrator/issues/2)
+> (blocked by [#1](https://github.com/pop-dog/agent-orchestrator/issues/1)).
 
 **Goal.** The flagship example and first dogfood: a Workflow that writes code for
 this repo. `code ⇄ review → commit`, all three Steps bespoke LLM agents
