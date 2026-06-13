@@ -38,9 +38,9 @@ runs to `EXIT 42`.
 
 ---
 
-## Slice 2 — Initial Message (Workflow arguments) 📋
+## Slice 2 — Initial Message (Workflow arguments) ✅
 
-> Migrated to [issue #1](https://github.com/pop-dog/agent-orchestrator/issues/1).
+> Done — [issue #1](https://github.com/pop-dog/agent-orchestrator/issues/1) (PR #3).
 
 **Goal.** Let a Run be invoked *with* an input Message, so a Workflow can take
 arguments. (Today the entry Step always receives an empty Message.)
@@ -60,10 +60,11 @@ receives it; omitting it preserves today's empty-Message behaviour.
 
 ---
 
-## Slice 3 — Agentic coder example Workflow 📋
+## Slice 3 — Agentic coder example Workflow ✅
 
-> Migrated to [issue #2](https://github.com/pop-dog/agent-orchestrator/issues/2)
-> (blocked by [#1](https://github.com/pop-dog/agent-orchestrator/issues/1)).
+> Done — [issue #2](https://github.com/pop-dog/agent-orchestrator/issues/2) (PR #4).
+> Each LLM Step runs under a least-privilege scoped permission policy
+> (`examples/coder/*.permissions.json` via `--settings`), verified end-to-end.
 
 **Goal.** The flagship example and first dogfood: a Workflow that writes code for
 this repo. `code ⇄ review → commit`, all three Steps bespoke LLM agents
