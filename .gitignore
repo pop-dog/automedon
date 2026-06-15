@@ -3,3 +3,5 @@
 # The coder Workflow's shared review findings — a transient working-directory
 # artifact, never part of the committed change.
 /FINDINGS.md
+
+.workflows
