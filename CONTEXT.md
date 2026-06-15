@@ -48,7 +48,7 @@ The single start node of a Workflow, where a Frame begins execution. Its in-Mess
 _Avoid_: Start state, root, head.
 
 **Name scope**:
-Step names are local to their Workflow — each Workflow is a self-contained namespace, so identically-named Steps in different Workflows never collide. A Workflow references another only as a whole (by path/import), never by reaching into its internal Steps. This makes every sub-Workflow a black box — the precondition for exit-code identity surfacing (a parent sees only the child's exit code, never its internals).
+Step names are local to their Workflow — each Workflow is a self-contained namespace, so identically-named Steps in different Workflows never collide. A Workflow references another only as a whole (by reference — by name within a multi-Workflow file, or by path), never by reaching into its internal Steps. This makes every sub-Workflow a black box — the precondition for exit-code identity surfacing (a parent sees only the child's exit code, never its internals).
 _Avoid_: Global names, qualified Step names.
 
 ## Runtime
