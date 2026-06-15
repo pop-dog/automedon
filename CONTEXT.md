@@ -86,7 +86,7 @@ A framework-detected condition that prevents a Workflow from reaching an Exit Ga
 _Avoid_: Error, exception, crash, panic.
 
 **Event**:
-An immutable record of one Kernel transition (StepEntered, StepExited, GateTaken, FramePushed/Popped, MessagePassed, BudgetConsumed/Exhausted, FaultRaised/Caught, RunStarted/Ended), timestamped and never mutated. The Kernel emits Events as a *side output* of execution; routing runs on separate in-memory working state — so this is event *logging*, not event sourcing (nothing reads the stream back to drive execution). Single-token execution (ADR-0004) makes the stream a totally ordered linear sequence.
+An immutable, never-mutated record of one Kernel transition (StepEntered, StepExited, GateTaken, FramePushed/Popped, MessagePassed, BudgetConsumed/Exhausted, FaultRaised/Caught, RunStarted/Ended). An Event records *what* transition happened, not *when*: timestamping and sequence-numbering are added by a persistence Sink, not intrinsic to an Event (ADR-0005). The Kernel emits Events as a *side output* of execution; routing runs on separate in-memory working state — so this is event *logging*, not event sourcing (nothing reads the stream back to drive execution). Single-token execution (ADR-0004) makes the stream a totally ordered linear sequence.
 _Avoid_: Log line, record, Message (a Message is data passed between Steps, not an execution record).
 
 **Sink**:
