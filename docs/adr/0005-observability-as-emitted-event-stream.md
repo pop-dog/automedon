@@ -5,6 +5,8 @@ The Kernel produces a record of every transition in a Run. Rather than persist i
 ## Decision
 
 - **Event logging, not event sourcing.** The Kernel routes on ordinary in-memory working state and *additionally* emits an append-only stream of Events (StepEntered, StepExited, GateTaken, FramePushed/Popped, MessagePassed, BudgetConsumed/Exhausted, FaultRaised/Caught, RunStarted/Ended) as a side output. Nothing reads the stream back to drive execution.
+- **Events are semantic; timestamping and ordering are a Sink's job (ADR-0009).** An Event records *what* transition happened, not *when*. A persistence Sink stamps each record with a wall-clock `ts` and a monotonic `seq` on receipt; the Kernel adds neither, staying dependency-light and deterministic (its tests assert exact Event sequences). The stream is still totally ordered — single-token execution means a Sink's receipt order *is* the causal order, so `seq` is faithful.
+- **Bulk Step output is a separate channel (ADR-0009).** What a Step prints does not ride the Event stream; the Kernel delivers it to Sinks via `on_output`, keeping Events a lean control-plane trace.
 - **The Kernel is the sole producer and is storage-agnostic.** It publishes Events through a narrow Sink interface (Observer / pub-sub). It owns the Event *vocabulary* (its observable surface, like a syscall trace) but never opens a file or chooses a format.
 - **Sinks are Modules:** persistence, console trace, live monitor, or none. Therefore **durability is a Sink's decision, not a Kernel property** — the Kernel is neither ephemeral nor durable; it emits.
 - **The stream is totally ordered** because execution is single-token (ADR-0004): no interleaving to reconcile.
