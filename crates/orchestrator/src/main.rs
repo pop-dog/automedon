@@ -5,7 +5,7 @@
 //! stdin (the flag wins); with no `--message` and nothing piped, it is empty.
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use kernel::{Event, Fault, GateKey, GateTarget, Sink, Workflow, WorkflowSource};
 
@@ -113,6 +113,20 @@ fn main() {
             std::process::exit(2);
         }
     };
+
+    // Expose the workflow definition's directory as $WORKFLOW_DIR so a Step can
+    // locate the scripts it names (e.g. `command: "$WORKFLOW_DIR/fetch.sh"`)
+    // independently of the working directory. This decouples *where the scripts
+    // live* (the workflow repo) from *where the work happens*: the cwd is left as
+    // the target project root — the repo a Step reads, edits, and commits — so a
+    // workflow and the repo it operates on need not be the same directory. The
+    // child Steps inherit this variable through the kernel's plain `sh -c` spawn.
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let workflow_dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    std::env::set_var("WORKFLOW_DIR", &workflow_dir);
 
     let source = YamlSource { path };
     let workflow = source.load().unwrap_or_else(|e| {

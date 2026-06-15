@@ -4,11 +4,14 @@
 # successor. Only the small path rides the Message channel — the bulk (the task
 # text, the edits, the review findings) lives in the working directory.
 #
-#   Run (from the repo root):  orchestrator examples/coder.yaml --message ./TASK.md
+#   Run (cwd = the repo to work on):
+#     orchestrator /path/to/examples/coder.yaml --message ./TASK.md
 #
-# The Steps are paths relative to the repo root and write FINDINGS.md into the
-# working directory, so run from the repo root. They also expect `claude`, and
-# (for the build check) `cargo`, on PATH.
+# Each Step names its script via $WORKFLOW_DIR — the directory of this file, set
+# by the orchestrator — so the scripts are found no matter the cwd. The Steps
+# read TASK.md and write FINDINGS.md into the cwd (the repo being worked on), so
+# the cwd is left as that repo. They also expect `claude`, and (for the build
+# check) `cargo`, on PATH.
 #
 # The code <-> review loop is bounded by `code`'s Budget. If review still reports
 # Blocking findings when that Budget is spent, the EXHAUSTED Gate escalates with
@@ -23,7 +26,7 @@ steps:
     # Reads TASK.md (and the findings file on loop-back), edits files, and runs
     # its own build + test loop until green. Leaves changes unstaged. Re-emits
     # the TASK.md path as its out-Message.
-    command: examples/coder/code.sh
+    command: "$WORKFLOW_DIR/coder/code.sh"
     budget: 3
     gates:
       - key: 0
@@ -39,7 +42,7 @@ steps:
   review:
     # Wraps the /code-review skill: writes findings to the shared findings file,
     # categorised Blocking vs Suggestion, and re-emits the TASK.md path.
-    command: examples/coder/review.sh
+    command: "$WORKFLOW_DIR/coder/review.sh"
     gates:
       - key: 0
         target: { step: commit }
@@ -54,7 +57,7 @@ steps:
   commit:
     # Writes a commit message from `git diff` + TASK.md and commits on the
     # current branch. Never pushes.
-    command: examples/coder/commit.sh
+    command: "$WORKFLOW_DIR/coder/commit.sh"
     budget: 1
     gates:
       - key: 0

@@ -9,8 +9,10 @@ use std::process::Command;
 /// code. `extra_env` scripts the stubs (e.g. the review outcome or a failing
 /// build) on top of the `CODER_STUB=1` switch.
 fn run_coder(extra_env: &[(&str, &str)]) -> i32 {
-    // The Workflow names its Steps by paths relative to the repo root, so the
-    // child must run from there.
+    // The Steps locate their scripts via $WORKFLOW_DIR (set by the orchestrator
+    // from the yaml's path), so the child no longer needs a particular cwd to
+    // find them. We still run from the repo root because that is the workspace
+    // the Steps read (./TASK.md) and write (FINDINGS.md).
     let repo_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_orchestrator"));
     cmd.current_dir(repo_root).env("CODER_STUB", "1");
