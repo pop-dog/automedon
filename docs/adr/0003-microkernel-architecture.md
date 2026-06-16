@@ -14,6 +14,7 @@ The tool is an *LLM agent orchestrator*, so the obvious design is to make LLM in
 - The graph layer stays LLM-independent, as the original concept required — the same engine orchestrates plain scripts and LLM agents identically.
 - Prompt-engineering and provider/SDK churn (the fastest-moving part of the stack) is quarantined in Modules and cannot destabilise the core.
 - There is exactly one kind of Step, preserving Step uniformity and the Composite substitutability of Workflows.
+- The Step ABI is embodied in one seam: a `StepExecutor` trait. The routing core (`run`) decides *which* Gate to take and calls the executor to run a Step, so routing is testable with canned outcomes while the subprocess plumbing (`sh -c`, the deadlock-safe pipe threads, the signal→`-1` mapping) lives behind a single swappable adapter — a future executor is then an additive change, not a Kernel one.
 
 ## Considered and rejected
 
