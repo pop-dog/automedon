@@ -34,11 +34,14 @@ pub fn runs_dir(
 
 /// Resolve the retention cap: a `--keep`/env value if it parses, else
 /// [`DEFAULT_KEEP`]. An unparseable override falls back to the default rather
-/// than failing the Run.
+/// than failing the Run. The cap is at least 1: the active Run is the newest
+/// entry and pruning keeps the newest `keep`, so 0 would delete the log the Run
+/// is currently writing.
 pub fn resolve_keep(flag: Option<&str>, env: Option<&str>) -> usize {
     flag.or(env)
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_KEEP)
+        .max(1)
 }
 
 #[cfg(test)]
@@ -74,5 +77,13 @@ mod tests {
     #[test]
     fn unparseable_keep_falls_back_to_default() {
         assert_eq!(resolve_keep(Some("lots"), None), DEFAULT_KEEP);
+    }
+
+    #[test]
+    fn keep_is_clamped_to_at_least_one() {
+        // 0 would otherwise prune the active Run's own directory (it is the
+        // newest entry, and pruning keeps the newest `keep`).
+        assert_eq!(resolve_keep(Some("0"), None), 1);
+        assert_eq!(resolve_keep(None, Some("0")), 1);
     }
 }
