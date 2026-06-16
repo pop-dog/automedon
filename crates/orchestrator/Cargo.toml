@@ -8,7 +8,10 @@ publish = false
 # concrete format — lives HERE, not in the kernel.
 [dependencies]
 kernel = { path = "../kernel" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
 serde_yaml = "0.9"
+uuid = { version = "1.23.3", features = ["v7"] }
 
 [[bin]]
 name = "orchestrator"

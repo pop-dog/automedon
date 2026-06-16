@@ -7,7 +7,12 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use kernel::{Event, Fault, GateKey, GateTarget, Sink, Workflow, WorkflowSource};
+use kernel::{Event, Fault, GateKey, GateTarget, Sink, Stream, Workflow, WorkflowSource};
+
+mod config;
+mod file_sink;
+mod retention;
+mod tee;
 
 /// A `WorkflowSource` that parses a Workflow IR from YAML.
 struct YamlSource {
@@ -27,13 +32,34 @@ const B: &str = "\x1b[1m"; // bold
 const D: &str = "\x1b[2m"; // dim
 const R: &str = "\x1b[0m"; // reset
 
-/// A trace Sink: one line per Kernel transition.
-struct ConsoleSink;
+/// A trace Sink: one line per Kernel transition, plus a live tee of Step output
+/// (dim, step-prefixed) on stderr. `quiet` suppresses the output tee for a
+/// control-only trace; the control Events still print.
+struct ConsoleSink {
+    quiet: bool,
+}
 
 impl Sink for ConsoleSink {
     fn emit(&mut self, event: &Event) {
         println!("{}", render(event));
     }
+
+    fn on_output(&mut self, step: &str, _activation: u32, _stream: Stream, bytes: &[u8]) {
+        if self.quiet {
+            return;
+        }
+        // Tee to stderr so it never mixes with a downstream consumer of the
+        // orchestrator's stdout, mirroring the formerly-inherited stderr view.
+        eprint!("{}", dim_prefixed(step, bytes));
+    }
+}
+
+/// Render a chunk of Step output as dim, step-prefixed lines for the live view.
+fn dim_prefixed(step: &str, bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    text.lines()
+        .map(|line| format!("  {D}{step} ▏ {line}{R}\n"))
+        .collect()
 }
 
 fn render(event: &Event) -> String {
@@ -96,20 +122,54 @@ fn resolve_initial_message(flag: Option<String>, stdin: Option<Vec<u8>>) -> Vec<
     }
 }
 
+/// Flags that consume the following argument as their value. Used to skip past
+/// `<flag> <value>` pairs when locating the positional Workflow path.
+const VALUE_FLAGS: &[&str] = &["--message", "--log-dir", "--keep"];
+
+/// Pull the value of `<flag> <value>` out of the argument list, if present.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1).cloned())
+}
+
 /// Pull the value of `--message <text>` out of the argument list, if present.
 fn message_flag(args: &[String]) -> Option<String> {
-    args.iter()
-        .position(|a| a == "--message")
-        .and_then(|i| args.get(i + 1).cloned())
+    flag_value(args, "--message")
+}
+
+/// Whether a boolean flag is present anywhere in the argument list.
+fn has_flag(args: &[String], flag: &str) -> bool {
+    args.iter().any(|a| a == flag)
+}
+
+/// The first positional argument (the Workflow path), skipping flags and the
+/// values of value-taking flags so `orchestrator -q wf.yaml` still locates it.
+fn workflow_path(args: &[String]) -> Option<&str> {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if VALUE_FLAGS.contains(&arg.as_str()) {
+            i += 2; // skip the flag and its value
+        } else if arg.starts_with('-') {
+            i += 1; // a boolean flag
+        } else {
+            return Some(arg);
+        }
+    }
+    None
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    let path = match args.first() {
+    let path = match workflow_path(&args) {
         Some(p) => PathBuf::from(p),
         None => {
-            eprintln!("usage: orchestrator <workflow.yaml> [--message <text>]");
+            eprintln!(
+                "usage: orchestrator <workflow.yaml> [--message <text>] \
+                 [-q|--quiet] [--log-dir <dir>] [--keep <n>]"
+            );
             std::process::exit(2);
         }
     };
@@ -145,7 +205,37 @@ fn main() {
 
     let initial_message = resolve_initial_message(message_flag(&args), piped_stdin);
 
-    let mut sink = ConsoleSink;
+    // Choose the runs directory, then mint this Run's UUIDv7 ID and hand its
+    // directory to the file Sink. The Kernel stays unaware of Run identity
+    // (ADR-0009).
+    let log_override = flag_value(&args, "--log-dir").or_else(|| env_var("AGENT_ORCHESTRATOR_LOG_DIR"));
+    let runs_dir = config::runs_dir(
+        log_override.as_deref(),
+        env_var("XDG_STATE_HOME").as_deref(),
+        env_var("HOME").as_deref(),
+    );
+    let keep = config::resolve_keep(
+        flag_value(&args, "--keep").as_deref(),
+        env_var("AGENT_ORCHESTRATOR_KEEP").as_deref(),
+    );
+
+    let run_id = uuid::Uuid::now_v7();
+    let run_dir = runs_dir.join(run_id.to_string());
+
+    let quiet = has_flag(&args, "-q") || has_flag(&args, "--quiet");
+    let mut sinks: Vec<Box<dyn Sink>> = vec![Box::new(ConsoleSink { quiet })];
+    match file_sink::FileSink::create(run_dir.clone()) {
+        Ok(file) => sinks.push(Box::new(file)),
+        // A Run that cannot be logged still runs; only durability is lost.
+        Err(e) => eprintln!("warning: cannot open run log at {}: {e}", run_dir.display()),
+    }
+
+    // Prune to the retention cap now that this Run's directory exists, so the
+    // newest (this) Run counts toward the kept N and the oldest are dropped first.
+    let _ = retention::prune(&runs_dir, keep);
+
+    let mut sink = tee::Tee::new(sinks);
+
     match kernel::run(&workflow, &initial_message, &mut sink) {
         Ok(code) => std::process::exit(code),
         // A Fault is not an exit code; surface it on a distinct status (sysexits EX_SOFTWARE).
@@ -153,15 +243,53 @@ fn main() {
     }
 }
 
+/// A non-empty environment variable, or `None`. An empty value is treated as
+/// unset so a blank override falls through to the next source.
+fn env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
 // Tests for the YAML front-end live here (where the format dependency lives), not
 // in the format-agnostic Kernel.
 #[cfg(test)]
 mod tests {
-    use super::{message_flag, resolve_initial_message};
+    use super::{dim_prefixed, has_flag, message_flag, resolve_initial_message, workflow_path};
     use kernel::{GateKey, GateTarget, Workflow};
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn workflow_path_skips_leading_flags_and_their_values() {
+        // A boolean flag and a value-taking flag both precede the positional path.
+        let argv = args(&["-q", "--log-dir", "/tmp/runs", "wf.yaml"]);
+        assert_eq!(workflow_path(&argv), Some("wf.yaml"));
+    }
+
+    #[test]
+    fn workflow_path_is_first_positional() {
+        let argv = args(&["wf.yaml", "--message", "hi"]);
+        assert_eq!(workflow_path(&argv), Some("wf.yaml"));
+    }
+
+    #[test]
+    fn workflow_path_absent_yields_none() {
+        let argv = args(&["-q", "--keep", "5"]);
+        assert_eq!(workflow_path(&argv), None);
+    }
+
+    #[test]
+    fn has_flag_detects_presence() {
+        assert!(has_flag(&args(&["wf.yaml", "-q"]), "-q"));
+        assert!(!has_flag(&args(&["wf.yaml"]), "-q"));
+    }
+
+    #[test]
+    fn dim_prefixed_tags_each_line_with_the_step() {
+        let rendered = dim_prefixed("build", b"first\nsecond\n");
+        assert!(rendered.contains("build ▏ first"));
+        assert!(rendered.contains("build ▏ second"));
     }
 
     #[test]

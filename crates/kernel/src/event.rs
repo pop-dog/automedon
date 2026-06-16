@@ -1,10 +1,15 @@
 //! The Event stream (a side output) and the Fault sum type.
 
+use serde::Serialize;
+
 use crate::ir::{GateKey, GateTarget};
 
 /// An immutable record of one Kernel transition. Emitted to Sinks; routing runs
 /// on separate working state (this is event *logging*, not sourcing).
-#[derive(Debug, Clone)]
+///
+/// `Serialize` lets a persistence Sink render the stream (e.g. as JSON); the
+/// Kernel still chooses no concrete format (ADR-0005).
+#[derive(Debug, Clone, Serialize)]
 pub enum Event {
     RunStarted,
     StepEntered { step: String },
@@ -20,7 +25,7 @@ pub enum Event {
 /// A framework-detected inability to reach an Exit Gate — never an author-chosen
 /// exit code. A Fault currently aborts the Run; catching a Fault at a Frame
 /// boundary is not yet implemented.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Fault {
     /// A Step's exit code matched no Gate (and there was no Default Gate).
     UnhandledOutcome { step: String, code: i32 },

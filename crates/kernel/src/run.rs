@@ -2,12 +2,14 @@
 //! Workflows are not yet supported.
 
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
 
 use crate::event::{Event, Fault};
 use crate::ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
-use crate::Sink;
+use crate::{Sink, Stream};
 
 /// Run a flat Workflow to an Exit Gate, emitting Events to `sink`.
 ///
@@ -30,6 +32,15 @@ pub fn run(workflow: &Workflow, initial_message: &[u8], sink: &mut dyn Sink) -> 
                 .unwrap_or(DEFAULT_BUDGET);
             (name.as_str(), budget)
         })
+        .collect();
+
+    // Per-Step activation counter: how many times each Step has been entered so
+    // far. The pre-increment value is the 0-based activation index handed to the
+    // output channel, disambiguating a Step run more than once under its Budget.
+    let mut activations: HashMap<&str, u32> = workflow
+        .steps
+        .keys()
+        .map(|name| (name.as_str(), 0u32))
         .collect();
 
     let mut current: &str = &workflow.entry;
@@ -57,7 +68,9 @@ pub fn run(workflow: &Workflow, initial_message: &[u8], sink: &mut dyn Sink) -> 
             });
             sink.emit(&Event::StepEntered { step: current.to_string() });
 
-            let (code, out) = invoke(step, &message);
+            let activation = activations[current];
+            *activations.get_mut(current).unwrap() += 1;
+            let (code, out) = invoke(step, &message, current, activation, sink);
             sink.emit(&Event::StepExited { step: current.to_string(), code });
             message = out;
 
@@ -100,24 +113,88 @@ fn raise(sink: &mut dyn Sink, fault: Fault) -> Result<i32, Fault> {
 }
 
 /// The Step ABI: spawn a process (cwd inherited), pipe the in-Message to stdin,
-/// capture the exit code and stdout (the out-Message). Bytes move opaquely.
-fn invoke(step: &Step, in_message: &[u8]) -> (i32, Vec<u8>) {
+/// capture the exit code and stdout (the out-Message). Both stdout and stderr
+/// are piped (not inherited) and their chunks streamed to the Sink's output
+/// channel as they arrive, so a Run's output is captured without losing the live
+/// view. Bytes move opaquely.
+fn invoke(
+    step: &Step,
+    in_message: &[u8],
+    name: &str,
+    activation: u32,
+    sink: &mut dyn Sink,
+) -> (i32, Vec<u8>) {
     let mut child = Command::new("sh")
         .arg("-c")
         .arg(&step.command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| panic!("failed to spawn step command {:?}: {e}", step.command));
 
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(in_message); // pipe may close early; that's fine
+    // All three pipes must be serviced concurrently: stdin is fed from its own
+    // thread while two reader threads drain stdout/stderr. Writing stdin to
+    // completion up front would deadlock when the in-Message exceeds the OS pipe
+    // buffer — the child fills its stdout pipe (which nobody is yet reading) and
+    // stops draining stdin, so both sides block. A Step's stdout becomes the next
+    // Step's stdin, so Messages can grow arbitrarily large in a real Workflow.
+    let stdin_writer = child.stdin.take().map(|mut stdin| {
+        let in_message = in_message.to_vec();
+        thread::spawn(move || {
+            let _ = stdin.write_all(&in_message); // pipe may close early; that's fine
+        })
+    });
+
+    // A reader thread per stream funnels chunks through one channel. The Sink is
+    // not `Send`, so the threads only carry bytes and this thread does every
+    // `on_output` call, in receipt order.
+    let (tx, rx) = mpsc::channel::<(Stream, Vec<u8>)>();
+    let stdout_reader = pipe_reader(child.stdout.take(), Stream::Stdout, tx.clone());
+    let stderr_reader = pipe_reader(child.stderr.take(), Stream::Stderr, tx);
+
+    let mut out = Vec::new();
+    for (stream, chunk) in rx {
+        if stream == Stream::Stdout {
+            out.extend_from_slice(&chunk);
+        }
+        sink.on_output(name, activation, stream, &chunk);
     }
-    let output = child.wait_with_output().expect("failed to wait on step");
+    stdout_reader.join().expect("stdout reader panicked");
+    stderr_reader.join().expect("stderr reader panicked");
+    if let Some(writer) = stdin_writer {
+        writer.join().expect("stdin writer panicked");
+    }
+
+    let status = child.wait().expect("failed to wait on step");
     // No exit code => killed by signal; treat as a routable failure code.
-    let code = output.status.code().unwrap_or(-1);
-    (code, output.stdout)
+    let code = status.code().unwrap_or(-1);
+    (code, out)
+}
+
+/// Spawn a thread that reads `pipe` to EOF in chunks, forwarding each chunk to
+/// `tx` tagged with its `stream`. A `None` pipe yields an immediately-finished
+/// thread. The thread owns its `tx` clone; when every clone is dropped the
+/// receiver's iteration ends.
+fn pipe_reader(
+    pipe: Option<impl Read + Send + 'static>,
+    stream: Stream,
+    tx: mpsc::Sender<(Stream, Vec<u8>)>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let Some(mut pipe) = pipe else { return };
+        let mut buf = [0u8; 8192];
+        loop {
+            match pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send((stream, buf[..n].to_vec())).is_err() {
+                        break; // receiver gone; nothing more to do
+                    }
+                }
+            }
+        }
+    })
 }
 
 #[cfg(test)]
@@ -127,16 +204,34 @@ mod tests {
     use crate::ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
     use crate::Sink;
 
-    /// A Sink that records every emitted Event for inspection.
+    use crate::Stream;
+
+    /// A Sink that records every emitted Event and every output chunk for
+    /// inspection.
     #[derive(Default)]
     struct MockSink {
         events: Vec<Event>,
+        outputs: Vec<(String, u32, Stream, Vec<u8>)>,
     }
 
     impl Sink for MockSink {
         fn emit(&mut self, event: &Event) {
             self.events.push(event.clone());
         }
+
+        fn on_output(&mut self, step: &str, activation: u32, stream: Stream, bytes: &[u8]) {
+            self.outputs.push((step.to_string(), activation, stream, bytes.to_vec()));
+        }
+    }
+
+    /// Concatenate every output chunk recorded for a (step, stream) pair, across
+    /// all activations, into one buffer.
+    fn captured(sink: &MockSink, step: &str, stream: Stream) -> Vec<u8> {
+        sink.outputs
+            .iter()
+            .filter(|(s, _, st, _)| s == step && *st == stream)
+            .flat_map(|(_, _, _, bytes)| bytes.iter().copied())
+            .collect()
     }
 
     fn gate(key: GateKey, target: GateTarget) -> Gate {
@@ -312,6 +407,99 @@ mod tests {
         let mut sink = MockSink::default();
         run(&looping_workflow(None, None), &[], &mut sink).unwrap();
         assert_eq!(entered(&sink), DEFAULT_BUDGET as usize);
+    }
+
+    #[test]
+    fn step_stderr_is_delivered_to_on_output() {
+        // A Step's stderr is captured and streamed to the Sink (no longer
+        // inherited by the terminal), so a failed Run is diagnosable.
+        let wf = workflow(
+            "s",
+            None,
+            vec![("s", step("echo boom >&2; exit 0", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+        let mut sink = MockSink::default();
+        run(&wf, &[], &mut sink).unwrap();
+        assert_eq!(captured(&sink, "s", Stream::Stderr), b"boom\n");
+    }
+
+    #[test]
+    fn step_stdout_is_both_captured_as_message_and_teed_to_on_output() {
+        // stdout is the out-Message (piped to the successor) AND mirrored to the
+        // output channel, so a Sink can persist it without intercepting routing.
+        let wf = workflow(
+            "s",
+            None,
+            vec![("s", step("echo hello", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+        let mut sink = MockSink::default();
+        run(&wf, &[], &mut sink).unwrap();
+        assert_eq!(captured(&sink, "s", Stream::Stdout), b"hello\n");
+    }
+
+    #[test]
+    fn activation_index_increments_across_budget() {
+        // A Step run three times under its Budget tags its output with a rising
+        // 0-based activation index, so repeated runs stay distinguishable.
+        let wf = workflow(
+            "loop",
+            None,
+            vec![(
+                "loop",
+                step(
+                    "echo tick >&2; exit 1",
+                    Some(3),
+                    vec![
+                        gate(GateKey::Default, GateTarget::Step("loop".into())),
+                        gate(GateKey::Exhausted, GateTarget::Exit(0)),
+                    ],
+                ),
+            )],
+        );
+        let mut sink = MockSink::default();
+        run(&wf, &[], &mut sink).unwrap();
+        let activations: Vec<u32> = sink
+            .outputs
+            .iter()
+            .filter(|(_, _, stream, _)| *stream == Stream::Stderr)
+            .map(|(_, activation, _, _)| *activation)
+            .collect();
+        assert_eq!(activations, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn large_in_message_does_not_deadlock_with_streaming_output() {
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        // `cat` echoes its stdin to stdout, exercising the three-pipe hazard: if
+        // the in-Message is written to stdin in full before the output readers
+        // start, the child's stdout pipe fills, blocking it from draining stdin,
+        // while the parent blocks writing stdin — a deadlock. The in-Message far
+        // exceeds the OS pipe buffer so the race is forced, not chanced.
+        let big = vec![b'x'; 1 << 20]; // 1 MiB
+        let wf = workflow(
+            "cat",
+            None,
+            vec![("cat", step("cat", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut sink = MockSink::default();
+            let code = run(&wf, &big, &mut sink).unwrap();
+            let echoed = captured(&sink, "cat", Stream::Stdout).len();
+            let _ = tx.send((code, echoed));
+        });
+
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok((code, echoed)) => {
+                assert_eq!(code, 0);
+                assert_eq!(echoed, 1 << 20, "the whole in-Message should echo through");
+            }
+            Err(_) => panic!("invoke deadlocked writing a large in-Message before draining output"),
+        }
     }
 
     #[test]

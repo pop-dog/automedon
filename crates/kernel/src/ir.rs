@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// A directed control-flow graph of Steps connected by Gates.
 #[derive(Debug, Deserialize)]
@@ -46,7 +46,7 @@ pub struct Gate {
 /// What unlocks a Gate. Routing matches an exit code against these in order:
 /// an exact `Code`, then `Default`; the special keys handle the cases where a
 /// Step produced no routable exit code.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum GateKey {
     /// An exact integer exit code.
     Code(i32),
@@ -60,7 +60,7 @@ pub enum GateKey {
 }
 
 /// Where a Gate leads: a successor Step, or termination with an exit code.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum GateTarget {
     /// Internal Gate -> a successor Step (by local name).
     Step(String),
