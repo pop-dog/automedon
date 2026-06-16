@@ -411,8 +411,8 @@ mod tests {
 
     #[test]
     fn step_stderr_is_delivered_to_on_output() {
-        // A Step's stderr is captured and streamed to the Sink (no longer
-        // inherited by the terminal), so a failed Run is diagnosable.
+        // A Step's stderr is captured and streamed to the Sink, so a failed
+        // Run is diagnosable.
         let wf = workflow(
             "s",
             None,

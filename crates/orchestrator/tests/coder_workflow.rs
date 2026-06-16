@@ -10,9 +10,9 @@ use std::process::Command;
 /// build) on top of the `CODER_STUB=1` switch.
 fn run_coder(extra_env: &[(&str, &str)]) -> i32 {
     // The Steps locate their scripts via $WORKFLOW_DIR (set by the orchestrator
-    // from the yaml's path), so the child no longer needs a particular cwd to
-    // find them. We still run from the repo root because that is the workspace
-    // the Steps read (./TASK.md) and write (FINDINGS.md).
+    // from the yaml's path), so the child needs no particular cwd to find them.
+    // We run from the repo root because that is the workspace the Steps read
+    // (./TASK.md) and write (FINDINGS.md).
     let repo_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_orchestrator"));
     cmd.current_dir(repo_root).env("CODER_STUB", "1");

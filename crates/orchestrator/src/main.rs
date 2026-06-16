@@ -48,8 +48,8 @@ impl Sink for ConsoleSink {
         if self.quiet {
             return;
         }
-        // Tee to stderr so it never mixes with a downstream consumer of the
-        // orchestrator's stdout, mirroring the formerly-inherited stderr view.
+        // Tee to stderr so Step output never mixes with a downstream consumer
+        // of the orchestrator's stdout.
         eprint!("{}", dim_prefixed(step, bytes));
     }
 }
@@ -230,8 +230,8 @@ fn main() {
         Err(e) => eprintln!("warning: cannot open run log at {}: {e}", run_dir.display()),
     }
 
-    // Prune to the retention cap now that this Run's directory exists, so the
-    // newest (this) Run counts toward the kept N and the oldest are dropped first.
+    // Prune once this Run's directory exists, so the newest (this) Run counts
+    // toward the kept N and the oldest are dropped first.
     let _ = retention::prune(&runs_dir, keep);
 
     let mut sink = tee::Tee::new(sinks);
