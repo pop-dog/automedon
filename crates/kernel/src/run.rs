@@ -2,23 +2,26 @@
 //! Workflows are not yet supported.
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::thread;
 
 use crate::event::{Event, Fault};
 use crate::ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
-use crate::{Sink, Stream};
+use crate::{Sink, StepExecutor};
 
 /// Run a flat Workflow to an Exit Gate, emitting Events to `sink`.
 ///
 /// `initial_message` seeds the entry Step's in-Message, letting a Run carry
-/// arguments; pass `&[]` for no input. Returns the Workflow exit code, or the
+/// arguments; pass `&[]` for no input. Each Step is run through `executor` (the
+/// Step-execution seam), so routing can be driven with canned outcomes in tests
+/// and real subprocesses in production. Returns the Workflow exit code, or the
 /// Fault that prevented reaching an Exit Gate. Panics on malformed input (a
 /// Gate/entry pointing at a missing Step, or a command that fails to spawn) —
 /// those are setup bugs, not model Faults, and are not validated here.
-pub fn run(workflow: &Workflow, initial_message: &[u8], sink: &mut dyn Sink) -> Result<i32, Fault> {
+pub fn run(
+    workflow: &Workflow,
+    initial_message: &[u8],
+    executor: &mut dyn StepExecutor,
+    sink: &mut dyn Sink,
+) -> Result<i32, Fault> {
     sink.emit(&Event::RunStarted);
 
     // The Frame: per-Step remaining Budget, resolved by the cascade up front.
@@ -70,7 +73,7 @@ pub fn run(workflow: &Workflow, initial_message: &[u8], sink: &mut dyn Sink) -> 
 
             let activation = activations[current];
             *activations.get_mut(current).unwrap() += 1;
-            let (code, out) = invoke(step, &message, current, activation, sink);
+            let (code, out) = executor.execute(step, &message, current, activation, sink);
             sink.emit(&Event::StepExited { step: current.to_string(), code });
             message = out;
 
@@ -112,99 +115,12 @@ fn raise(sink: &mut dyn Sink, fault: Fault) -> Result<i32, Fault> {
     Err(fault)
 }
 
-/// The Step ABI: spawn a process (cwd inherited), pipe the in-Message to stdin,
-/// capture the exit code and stdout (the out-Message). Both stdout and stderr
-/// are piped (not inherited) and their chunks streamed to the Sink's output
-/// channel as they arrive, so a Run's output is captured without losing the live
-/// view. Bytes move opaquely.
-fn invoke(
-    step: &Step,
-    in_message: &[u8],
-    name: &str,
-    activation: u32,
-    sink: &mut dyn Sink,
-) -> (i32, Vec<u8>) {
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(&step.command)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|e| panic!("failed to spawn step command {:?}: {e}", step.command));
-
-    // All three pipes must be serviced concurrently: stdin is fed from its own
-    // thread while two reader threads drain stdout/stderr. Writing stdin to
-    // completion up front would deadlock when the in-Message exceeds the OS pipe
-    // buffer — the child fills its stdout pipe (which nobody is yet reading) and
-    // stops draining stdin, so both sides block. A Step's stdout becomes the next
-    // Step's stdin, so Messages can grow arbitrarily large in a real Workflow.
-    let stdin_writer = child.stdin.take().map(|mut stdin| {
-        let in_message = in_message.to_vec();
-        thread::spawn(move || {
-            let _ = stdin.write_all(&in_message); // pipe may close early; that's fine
-        })
-    });
-
-    // A reader thread per stream funnels chunks through one channel. The Sink is
-    // not `Send`, so the threads only carry bytes and this thread does every
-    // `on_output` call, in receipt order.
-    let (tx, rx) = mpsc::channel::<(Stream, Vec<u8>)>();
-    let stdout_reader = pipe_reader(child.stdout.take(), Stream::Stdout, tx.clone());
-    let stderr_reader = pipe_reader(child.stderr.take(), Stream::Stderr, tx);
-
-    let mut out = Vec::new();
-    for (stream, chunk) in rx {
-        if stream == Stream::Stdout {
-            out.extend_from_slice(&chunk);
-        }
-        sink.on_output(name, activation, stream, &chunk);
-    }
-    stdout_reader.join().expect("stdout reader panicked");
-    stderr_reader.join().expect("stderr reader panicked");
-    if let Some(writer) = stdin_writer {
-        writer.join().expect("stdin writer panicked");
-    }
-
-    let status = child.wait().expect("failed to wait on step");
-    // No exit code => killed by signal; treat as a routable failure code.
-    let code = status.code().unwrap_or(-1);
-    (code, out)
-}
-
-/// Spawn a thread that reads `pipe` to EOF in chunks, forwarding each chunk to
-/// `tx` tagged with its `stream`. A `None` pipe yields an immediately-finished
-/// thread. The thread owns its `tx` clone; when every clone is dropped the
-/// receiver's iteration ends.
-fn pipe_reader(
-    pipe: Option<impl Read + Send + 'static>,
-    stream: Stream,
-    tx: mpsc::Sender<(Stream, Vec<u8>)>,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        let Some(mut pipe) = pipe else { return };
-        let mut buf = [0u8; 8192];
-        loop {
-            match pipe.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if tx.send((stream, buf[..n].to_vec())).is_err() {
-                        break; // receiver gone; nothing more to do
-                    }
-                }
-            }
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::run;
     use crate::event::{Event, Fault};
     use crate::ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
-    use crate::Sink;
-
-    use crate::Stream;
+    use crate::{Sink, StepExecutor, Stream, SubprocessExecutor};
 
     /// A Sink that records every emitted Event and every output chunk for
     /// inspection.
@@ -232,6 +148,47 @@ mod tests {
             .filter(|(s, _, st, _)| s == step && *st == stream)
             .flat_map(|(_, _, _, bytes)| bytes.iter().copied())
             .collect()
+    }
+
+    /// A [`StepExecutor`] that returns a canned `(code, bytes)` per Step name,
+    /// the same outcome for every activation, and streams the bytes to the Sink's
+    /// `on_output`. Lets routing tests exercise the core with no shell and no I/O.
+    #[derive(Default)]
+    struct CannedExecutor {
+        outcomes: std::collections::HashMap<String, (i32, Vec<u8>)>,
+    }
+
+    impl CannedExecutor {
+        /// One Step always exiting with `code` and no output.
+        fn returning(step: &str, code: i32) -> Self {
+            Self::default().with(step, code)
+        }
+
+        fn with(mut self, step: &str, code: i32) -> Self {
+            self.outcomes.insert(step.to_string(), (code, Vec::new()));
+            self
+        }
+    }
+
+    impl StepExecutor for CannedExecutor {
+        fn execute(
+            &mut self,
+            _step: &Step,
+            _in_message: &[u8],
+            name: &str,
+            activation: u32,
+            sink: &mut dyn Sink,
+        ) -> (i32, Vec<u8>) {
+            let (code, out) = self
+                .outcomes
+                .get(name)
+                .unwrap_or_else(|| panic!("no canned outcome for step {name:?}"))
+                .clone();
+            if !out.is_empty() {
+                sink.on_output(name, activation, Stream::Stdout, &out);
+            }
+            (code, out)
+        }
     }
 
     fn gate(key: GateKey, target: GateTarget) -> Gate {
@@ -290,8 +247,9 @@ mod tests {
                 ),
             )],
         );
+        let mut exec = CannedExecutor::returning("s", 0);
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &[], &mut sink).unwrap(), 10);
+        assert_eq!(run(&wf, &[], &mut exec, &mut sink).unwrap(), 10);
     }
 
     #[test]
@@ -311,8 +269,9 @@ mod tests {
                 ),
             )],
         );
+        let mut exec = CannedExecutor::returning("s", 5);
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &[], &mut sink).unwrap(), 99);
+        assert_eq!(run(&wf, &[], &mut exec, &mut sink).unwrap(), 99);
     }
 
     #[test]
@@ -333,8 +292,9 @@ mod tests {
                 ),
             )],
         );
+        let mut exec = CannedExecutor::returning("loop", 1);
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &[], &mut sink).unwrap(), 42);
+        assert_eq!(run(&wf, &[], &mut exec, &mut sink).unwrap(), 42);
 
         // The Step runs exactly Budget times, then Exhaustion fires once.
         assert_eq!(entered(&sink), 3);
@@ -362,8 +322,9 @@ mod tests {
             None,
             vec![("s", step("exit 7", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
         );
+        let mut exec = CannedExecutor::returning("s", 7);
         let mut sink = MockSink::default();
-        match run(&wf, &[], &mut sink) {
+        match run(&wf, &[], &mut exec, &mut sink) {
             Err(Fault::UnhandledOutcome { step, code }) => {
                 assert_eq!(step, "s");
                 assert_eq!(code, 7);
@@ -384,8 +345,9 @@ mod tests {
                 step("exit 1", Some(2), vec![gate(GateKey::Default, GateTarget::Step("loop".into()))]),
             )],
         );
+        let mut exec = CannedExecutor::returning("loop", 1);
         let mut sink = MockSink::default();
-        match run(&wf, &[], &mut sink) {
+        match run(&wf, &[], &mut exec, &mut sink) {
             Err(Fault::UnhandledExhaustion { step }) => assert_eq!(step, "loop"),
             other => panic!("expected UnhandledExhaustion, got {other:?}"),
         }
@@ -393,19 +355,23 @@ mod tests {
 
     #[test]
     fn budget_cascade_prefers_step_then_workflow_then_default() {
+        // The looping Step always fails, so the cascade alone decides how many
+        // activations precede Exhaustion.
+        let mut exec = CannedExecutor::returning("loop", 1);
+
         // Step Budget overrides the Workflow default.
         let mut sink = MockSink::default();
-        run(&looping_workflow(Some(5), Some(2)), &[], &mut sink).unwrap();
+        run(&looping_workflow(Some(5), Some(2)), &[], &mut exec, &mut sink).unwrap();
         assert_eq!(entered(&sink), 2);
 
         // Workflow default applies when the Step has no Budget.
         let mut sink = MockSink::default();
-        run(&looping_workflow(Some(3), None), &[], &mut sink).unwrap();
+        run(&looping_workflow(Some(3), None), &[], &mut exec, &mut sink).unwrap();
         assert_eq!(entered(&sink), 3);
 
         // The hardcoded default applies when neither is set.
         let mut sink = MockSink::default();
-        run(&looping_workflow(None, None), &[], &mut sink).unwrap();
+        run(&looping_workflow(None, None), &[], &mut exec, &mut sink).unwrap();
         assert_eq!(entered(&sink), DEFAULT_BUDGET as usize);
     }
 
@@ -418,8 +384,9 @@ mod tests {
             None,
             vec![("s", step("echo boom >&2; exit 0", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
         );
+        let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        run(&wf, &[], &mut sink).unwrap();
+        run(&wf, &[], &mut exec, &mut sink).unwrap();
         assert_eq!(captured(&sink, "s", Stream::Stderr), b"boom\n");
     }
 
@@ -432,8 +399,9 @@ mod tests {
             None,
             vec![("s", step("echo hello", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
         );
+        let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        run(&wf, &[], &mut sink).unwrap();
+        run(&wf, &[], &mut exec, &mut sink).unwrap();
         assert_eq!(captured(&sink, "s", Stream::Stdout), b"hello\n");
     }
 
@@ -456,8 +424,9 @@ mod tests {
                 ),
             )],
         );
+        let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        run(&wf, &[], &mut sink).unwrap();
+        run(&wf, &[], &mut exec, &mut sink).unwrap();
         let activations: Vec<u32> = sink
             .outputs
             .iter()
@@ -487,8 +456,9 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
+            let mut exec = SubprocessExecutor::new();
             let mut sink = MockSink::default();
-            let code = run(&wf, &big, &mut sink).unwrap();
+            let code = run(&wf, &big, &mut exec, &mut sink).unwrap();
             let echoed = captured(&sink, "cat", Stream::Stdout).len();
             let _ = tx.send((code, echoed));
         });
@@ -524,8 +494,9 @@ mod tests {
                 ),
             ],
         );
+        let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &[], &mut sink).unwrap(), 0);
+        assert_eq!(run(&wf, &[], &mut exec, &mut sink).unwrap(), 0);
     }
 
     #[test]
@@ -547,7 +518,8 @@ mod tests {
                 ),
             )],
         );
+        let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, b"5", &mut sink).unwrap(), 0);
+        assert_eq!(run(&wf, b"5", &mut exec, &mut sink).unwrap(), 0);
     }
 }
