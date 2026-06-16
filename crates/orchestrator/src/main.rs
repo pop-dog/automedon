@@ -7,7 +7,9 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use kernel::{Event, Fault, GateKey, GateTarget, Sink, Stream, Workflow, WorkflowSource};
+use kernel::{
+    Event, Fault, GateKey, GateTarget, Sink, Stream, SubprocessExecutor, Workflow, WorkflowSource,
+};
 
 mod config;
 mod file_sink;
@@ -235,8 +237,9 @@ fn main() {
     let _ = retention::prune(&runs_dir, keep);
 
     let mut sink = tee::Tee::new(sinks);
+    let mut executor = SubprocessExecutor::new();
 
-    match kernel::run(&workflow, &initial_message, &mut sink) {
+    match kernel::run(&workflow, &initial_message, &mut executor, &mut sink) {
         Ok(code) => std::process::exit(code),
         // A Fault is not an exit code; surface it on a distinct status (sysexits EX_SOFTWARE).
         Err(_) => std::process::exit(70),

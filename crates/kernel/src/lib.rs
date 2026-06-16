@@ -9,10 +9,12 @@
 //! Steps, Depth, and catching Faults at a Frame boundary.
 
 mod event;
+mod executor;
 mod ir;
 mod run;
 
 pub use event::{Event, Fault};
+pub use executor::{StepExecutor, SubprocessExecutor};
 pub use ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
 pub use run::run;
 
