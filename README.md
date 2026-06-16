@@ -99,6 +99,31 @@ toolset is too wide to allowlist; it uses `--dangerously-skip-permissions` and
 relies on running against a throwaway branch a human reviews before pushing. The
 Steps expect `claude` (and `cargo`, for the build check) on `PATH`.
 
+### Run logs
+
+A file Sink persists every Run to its own directory under
+`$XDG_STATE_HOME/agent-orchestrator/runs/<run-id>/` (falling back to
+`~/.local/state/...`), where `<run-id>` is a time-sortable UUIDv7. Each directory
+holds:
+
+- `events.jsonl` — one JSON record per Kernel transition (the Step/Gate trace),
+  each stamped with a Sink-assigned monotonic `seq` and wall-clock `ts`.
+- `<step>.<activation>.<stream>` — the raw stdout/stderr a Step produced, one
+  sidecar per stream per activation, referenced from `events.jsonl`. To see *why*
+  a Step failed, read its `.stderr` sidecar.
+
+This separation of a lean control-plane log from bulk output is
+[ADR-0009](docs/adr/0009-step-output-on-a-dedicated-sink-channel.md); the Kernel
+emits, the Sink persists ([ADR-0005](docs/adr/0005-observability-as-emitted-event-stream.md)).
+
+Flags (each with an environment fallback):
+
+| Flag | Env | Effect |
+| --- | --- | --- |
+| `--log-dir <dir>` | `AGENT_ORCHESTRATOR_LOG_DIR` | Write Run directories under `<dir>` instead of the default. |
+| `--keep <n>` | `AGENT_ORCHESTRATOR_KEEP` | Retain the newest `n` Runs, pruning oldest first at startup (default 100, minimum 1). |
+| `-q`, `--quiet` | — | Suppress the live tee of Step output; the control trace still prints. |
+
 ## Crate layout
 
 This is a Cargo workspace (edition 2021). Dependency arrows point only at
