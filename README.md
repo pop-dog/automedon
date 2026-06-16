@@ -131,7 +131,8 @@ This is a Cargo workspace (edition 2021). Dependency arrows point only at
 ([ADR-0003](docs/adr/0003-microkernel-architecture.md)).
 
 ```text
-crates/kernel/         lib: IR types, WorkflowSource + Sink traits, the run loop.
+crates/kernel/         lib: IR types; WorkflowSource + Sink + StepExecutor traits;
+                       the routing core (run loop) + the subprocess StepExecutor.
 crates/orchestrator/   bin: serde_yaml loader + console Sink + main().
 examples/              example Workflows (loop.yaml, coder.yaml).
 docs/                  ADRs, conventions, and developer docs.
