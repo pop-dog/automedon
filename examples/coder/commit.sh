@@ -14,8 +14,11 @@ fi
 prompt="Use the /commit skill to commit the current changes on the current
 branch, using the task in the file at ${task_path} for intent. Do not push."
 
-# Least-privilege permissions for this Step: git add/commit only, never push.
-# The policy lives beside the script so the "never pushes" invariant is explicit.
+# Run the commit agent unattended under a scoped permission policy. A Workflow
+# Step is non-interactive, so the policy uses bypassPermissions (no prompts to
+# hang on) while its deny rules still enforce the "never pushes" invariant — a
+# denied tool cannot be re-allowed by anything the agent does. The narrow git
+# toolset here keeps that allowlist short; the broad code Step cannot.
 claude --settings "${0%/*}/commit.permissions.json" -p "$prompt" 1>&2
 code=$?
 

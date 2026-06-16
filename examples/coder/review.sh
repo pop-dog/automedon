@@ -30,8 +30,12 @@ findings under a "## Suggestion" heading. After writing the file, print exactly
 one final line on its own: "VERDICT: BLOCKING" if there are any Critical or
 Major findings, otherwise "VERDICT: CLEAN".'
 
-# Least-privilege permissions for this Step: write only FINDINGS.md and read the
-# diff; it may not edit source or commit. The policy lives beside the script.
+# Run the review agent unattended under a scoped permission policy. The
+# /code-review skill drives many read tools, so the policy uses bypassPermissions
+# (no prompts to hang a non-interactive Step) rather than a narrow allowlist that
+# would block the skill. Its deny rules still hold the line that matters: review
+# may read freely and write FINDINGS.md, but cannot edit crate source or stage,
+# commit, or push — so no review-introduced change can advance un-reviewed.
 verdict="$(claude --settings "${0%/*}/review.permissions.json" -p "$prompt" 2>/dev/null | grep -E '^VERDICT: (BLOCKING|CLEAN)$' | tail -n 1)"
 
 printf '%s' "$task_path"

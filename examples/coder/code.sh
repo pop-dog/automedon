@@ -27,9 +27,12 @@ ${task_path}. ${revise}Work test-first: write a failing test, make it pass, then
 refactor, iterating until the build and tests are green. Leave all changes
 unstaged and do not commit."
 
-# Least-privilege permissions for this Step (edit + cargo only; no git). The
-# policy lives beside the script so it is cwd-independent and reviewable.
-claude --settings "${0%/*}/code.permissions.json" -p "$prompt" 1>&2
+# Run the coding agent unattended: a Workflow Step is non-interactive, so there
+# is no human to answer permission prompts. Unlike the narrow commit and review
+# Steps, this Step edits source, runs the build, and drives the /tdd skill, so
+# its toolset is too broad to allowlist; it is isolated by running against a
+# throwaway branch/working copy instead.
+claude --dangerously-skip-permissions -p "$prompt" 1>&2
 
 # The kernel orchestrates the meaningful checkpoint: an objective green build.
 if cargo build 1>&2 && cargo test 1>&2; then

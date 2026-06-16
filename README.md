@@ -89,9 +89,15 @@ findings for a human. Run it from the repo root:
 cargo run -p orchestrator -- examples/coder.yaml --message ./TASK.md
 ```
 
-Each LLM Step runs under a least-privilege scoped permission policy
-(`examples/coder/*.permissions.json`). The Steps expect `claude` (and `cargo`,
-for the build check) on `PATH`.
+Each LLM Step runs its agent unattended, since a Workflow Step is
+non-interactive. The narrow `commit` and `review` Steps run under scoped
+permission policies (`examples/coder/*.permissions.json`) whose deny rules
+enforce the invariants that matter — `commit` never pushes, `review` never edits
+crate source or stages a commit — while skipping prompts so the Step does not
+hang. The broad `code` Step edits source and drives the `/tdd` skill, so its
+toolset is too wide to allowlist; it uses `--dangerously-skip-permissions` and
+relies on running against a throwaway branch a human reviews before pushing. The
+Steps expect `claude` (and `cargo`, for the build check) on `PATH`.
 
 ## Crate layout
 
