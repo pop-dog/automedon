@@ -4,7 +4,23 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+
+/// Identifies a Workflow within a [`Registry`]. A Composite Step names its child
+/// by this id; it is the `workflows:` map key, never a path (ADR-0008).
+pub type WorkflowId = String;
+
+/// The set of Workflows a Run can reach, plus the id of the root. The Kernel runs
+/// against a registry rather than a single Workflow so a Composite Step can name
+/// a child by id (ADR-0008); whether ids were assembled from one file or many is
+/// a [`crate::WorkflowSource`] concern the engine never sees.
+#[derive(Debug, Deserialize)]
+pub struct Registry {
+    /// The Workflow the Run begins in.
+    pub root: WorkflowId,
+    /// Every Workflow, keyed by id. References (`StepBody::Workflow`) resolve here.
+    pub workflows: HashMap<WorkflowId, Workflow>,
+}
 
 /// A directed control-flow graph of Steps connected by Gates.
 #[derive(Debug, Deserialize)]
@@ -18,19 +34,27 @@ pub struct Workflow {
     pub steps: HashMap<String, Step>,
 }
 
-/// A single executable unit: runs a command, terminates with an exit code.
-#[derive(Debug, Deserialize)]
+/// A single routable unit: it terminates with an exit code that unlocks a Gate.
+#[derive(Debug)]
 pub struct Step {
-    /// The command, run via `sh -c` with the working directory inherited. A Step
-    /// is currently only a command; Composite (sub-Workflow) Steps are not yet
-    /// represented.
-    pub command: String,
+    /// What the Step *is*: a leaf command, or a sub-Workflow (Composite).
+    pub body: StepBody,
     /// Max activations of this Step within one Frame. `None` -> cascade default.
-    #[serde(default)]
     pub budget: Option<u32>,
     /// Outgoing Gates. Each key unlocks at most one Gate.
-    #[serde(default)]
     pub gates: Vec<Gate>,
+}
+
+/// What a Step does. A leaf `Command` runs via the executor; a `Workflow`
+/// (Composite) runs the named child sub-Workflow to its Exit Gate and surfaces
+/// its code. The two are mutually exclusive — illegal "two bodies" states are
+/// unrepresentable (ADR-0008).
+#[derive(Debug, Clone)]
+pub enum StepBody {
+    /// Run a command via `sh -c` with the working directory inherited.
+    Command(String),
+    /// Push a Frame for the named child Workflow (a Composite Step).
+    Workflow(WorkflowId),
 }
 
 /// An outgoing exit from a Step: `(key -> target)`.
@@ -54,8 +78,7 @@ pub enum GateKey {
     Default,
     /// Taken instead of entering a Step whose Budget is spent.
     Exhausted,
-    /// Taken when a child sub-Workflow surfaces a Fault. Not yet routed on:
-    /// catching a Fault at a Frame boundary is not implemented.
+    /// Taken when a child sub-Workflow surfaces a Fault (the `catch` clause).
     Fault,
 }
 
@@ -70,6 +93,40 @@ pub enum GateTarget {
 
 /// Hardcoded Budget default, last in the cascade.
 pub const DEFAULT_BUDGET: u32 = 10;
+
+// A Step body is written as a flat `command:` *xor* `workflow:` key alongside
+// `budget`/`gates`, so we deserialize via a raw shim and map onto `StepBody` —
+// the same one-of pattern as `GateTarget`, keeping the illegal two-bodies state
+// out of the type.
+impl<'de> Deserialize<'de> for Step {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Raw {
+            #[serde(default)]
+            command: Option<String>,
+            #[serde(default)]
+            workflow: Option<WorkflowId>,
+            #[serde(default)]
+            budget: Option<u32>,
+            #[serde(default)]
+            gates: Vec<Gate>,
+        }
+        let raw = Raw::deserialize(d)?;
+        let body = match (raw.command, raw.workflow) {
+            (Some(c), None) => StepBody::Command(c),
+            (None, Some(w)) => StepBody::Workflow(w),
+            _ => {
+                return Err(de::Error::custom(
+                    "step body must be exactly one of `command: <sh>` or `workflow: <id>`",
+                ))
+            }
+        };
+        Ok(Step { body, budget: raw.budget, gates: raw.gates })
+    }
+}
 
 // Written in YAML as a single-key map: `{ step: name }` or `{ exit: 0 }`.
 impl<'de> Deserialize<'de> for GateTarget {

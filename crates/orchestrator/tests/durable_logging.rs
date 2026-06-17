@@ -41,12 +41,15 @@ fn failed_step_stderr_is_recoverable_from_the_run_directory() {
     // A one-Step Workflow that prints to stderr and exits non-zero, routing that
     // code straight to an Exit Gate so the Run ends deterministically.
     let wf = r#"
-entry: boom
-steps:
-  boom:
-    command: "echo 'diagnostic detail' >&2; exit 3"
-    gates:
-      - { key: 3, target: { exit: 3 } }
+root: main
+workflows:
+  main:
+    entry: boom
+    steps:
+      boom:
+        command: "echo 'diagnostic detail' >&2; exit 3"
+        gates:
+          - { key: 3, target: { exit: 3 } }
 "#;
     let wf_path = work.0.join("wf.yaml");
     std::fs::write(&wf_path, wf).unwrap();
@@ -91,12 +94,15 @@ fn runs_directory_is_pruned_to_the_retention_cap() {
     // A trivial Workflow that exits cleanly, so each invocation mints one Run
     // directory under the shared log dir.
     let wf = r#"
-entry: ok
-steps:
-  ok:
-    command: "true"
-    gates:
-      - { key: 0, target: { exit: 0 } }
+root: main
+workflows:
+  main:
+    entry: ok
+    steps:
+      ok:
+        command: "true"
+        gates:
+          - { key: 0, target: { exit: 0 } }
 "#;
     let wf_path = work.0.join("wf.yaml");
     std::fs::write(&wf_path, wf).unwrap();

@@ -16,6 +16,14 @@ pub enum Event {
     StepExited { step: String, code: i32 },
     BudgetConsumed { step: String, remaining: u32 },
     Exhausted { step: String },
+    /// A Composite Step pushed a Frame for its child `workflow`; `depth` is the
+    /// pushed Frame's Depth. Nested inside the Step's `StepEntered`/`StepExited`
+    /// bracket.
+    FramePushed { step: String, workflow: String, depth: u32 },
+    /// The child Frame entered at `step` has been popped (it reached an Exit Gate
+    /// or unwound a Fault). The surfaced exit code, if any, follows in the
+    /// Composite Step's `StepExited`.
+    FramePopped { step: String, workflow: String },
     GateTaken { step: String, key: GateKey, target: GateTarget },
     MessagePassed { from: String, to: String, bytes: usize },
     FaultRaised { fault: Fault },
@@ -31,7 +39,9 @@ pub enum Fault {
     UnhandledOutcome { step: String, code: i32 },
     /// A spent Budget with no EXHAUSTED Gate.
     UnhandledExhaustion { step: String },
-    /// The Run's max Depth was exceeded. Not yet constructed: the run loop
-    /// executes a single Frame, so nesting cannot occur.
-    DepthOverflow,
+    /// Entering a Composite Step would exceed the Run's max Depth. Carries the
+    /// child `workflow` that could not be pushed. The one non-catchable Fault: it
+    /// is never offered to a `FAULT` Gate and aborts the Run unconditionally
+    /// (ADR-0002).
+    DepthOverflow { workflow: String },
 }

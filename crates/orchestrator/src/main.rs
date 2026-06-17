@@ -8,7 +8,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use kernel::{
-    Event, Fault, GateKey, GateTarget, Sink, Stream, SubprocessExecutor, Workflow, WorkflowSource,
+    Event, Fault, GateKey, GateTarget, Registry, RunConfig, Sink, Stream, SubprocessExecutor,
+    WorkflowSource,
 };
 
 mod config;
@@ -16,16 +17,18 @@ mod file_sink;
 mod retention;
 mod tee;
 
-/// A `WorkflowSource` that parses a Workflow IR from YAML.
+/// A `WorkflowSource` that parses a Workflow registry from a multi-Workflow YAML
+/// file (`root:` + `workflows:`). Cross-file references are a future, additive
+/// source (ADR-0008); this one resolves names within the single file.
 struct YamlSource {
     path: PathBuf,
 }
 
 impl WorkflowSource for YamlSource {
-    fn load(&self) -> Result<Workflow, Box<dyn std::error::Error>> {
+    fn load(&self) -> Result<Registry, Box<dyn std::error::Error>> {
         let text = std::fs::read_to_string(&self.path)?;
-        let workflow: Workflow = serde_yaml::from_str(&text)?;
-        Ok(workflow)
+        let registry: Registry = serde_yaml::from_str(&text)?;
+        Ok(registry)
     }
 }
 
@@ -73,6 +76,12 @@ fn render(event: &Event) -> String {
             format!("  {D}· budget {step}: {remaining} left{R}")
         }
         Event::Exhausted { step } => format!("  {B}⊘ EXHAUSTED{R} {step} {D}(budget spent){R}"),
+        Event::FramePushed { step, workflow, depth } => {
+            format!("  {B}╆ push{R} {step} {D}->{R} {workflow} {D}(depth {depth}){R}")
+        }
+        Event::FramePopped { step, workflow } => {
+            format!("  {D}╄ pop{R}   {step} {D}<-{R} {workflow}")
+        }
         Event::GateTaken { step, key, target } => {
             format!("  {D}↳ gate{R} {step} {D}[{}]{R} {D}->{R} {}", fmt_key(key), fmt_target(target))
         }
@@ -108,7 +117,9 @@ fn fmt_fault(fault: &Fault) -> String {
         Fault::UnhandledExhaustion { step } => {
             format!("unhandled exhaustion: {step} spent its Budget with no EXHAUSTED Gate")
         }
-        Fault::DepthOverflow => "depth overflow".to_string(),
+        Fault::DepthOverflow { workflow } => {
+            format!("depth overflow: entering {workflow} would exceed the max Depth")
+        }
     }
 }
 
@@ -135,6 +146,7 @@ struct Cli {
     quiet: bool,
     log_dir: Option<String>,
     keep: Option<String>,
+    max_depth: Option<String>,
 }
 
 /// The invocation is missing the positional Workflow path.
@@ -150,6 +162,7 @@ impl Cli {
         let mut quiet = false;
         let mut log_dir = None;
         let mut keep = None;
+        let mut max_depth = None;
 
         // Each flag's spelling and whether it consumes the next argument as its
         // value are defined only here — one source of truth for the flag vocabulary.
@@ -170,6 +183,10 @@ impl Cli {
                     keep = value();
                     i += 2;
                 }
+                "--max-depth" => {
+                    max_depth = value();
+                    i += 2;
+                }
                 "-q" | "--quiet" => {
                     quiet = true;
                     i += 1;
@@ -183,7 +200,7 @@ impl Cli {
         }
 
         match path {
-            Some(path) => Ok(Cli { path, message, quiet, log_dir, keep }),
+            Some(path) => Ok(Cli { path, message, quiet, log_dir, keep, max_depth }),
             None => Err(UsageError),
         }
     }
@@ -195,7 +212,7 @@ fn main() {
     let cli = Cli::parse(&args).unwrap_or_else(|UsageError| {
         eprintln!(
             "usage: orchestrator <workflow.yaml> [--message <text>] \
-             [-q|--quiet] [--log-dir <dir>] [--keep <n>]"
+             [-q|--quiet] [--log-dir <dir>] [--keep <n>] [--max-depth <n>]"
         );
         std::process::exit(2);
     });
@@ -216,7 +233,7 @@ fn main() {
     std::env::set_var("WORKFLOW_DIR", &workflow_dir);
 
     let source = YamlSource { path };
-    let workflow = source.load().unwrap_or_else(|e| {
+    let registry = source.load().unwrap_or_else(|e| {
         eprintln!("failed to load workflow: {e}");
         std::process::exit(2);
     });
@@ -263,7 +280,13 @@ fn main() {
     let mut sink = tee::Tee::new(sinks);
     let mut executor = SubprocessExecutor::new();
 
-    match kernel::run(&workflow, &initial_message, &mut executor, &mut sink) {
+    let max_depth = config::resolve_max_depth(
+        cli.max_depth.as_deref(),
+        env_var("AGENT_ORCHESTRATOR_MAX_DEPTH").as_deref(),
+    );
+    let run_config = RunConfig::default().with_max_depth(max_depth);
+
+    match kernel::run(&registry, &initial_message, &run_config, &mut executor, &mut sink) {
         Ok(code) => std::process::exit(code),
         // A Fault is not an exit code; surface it on a distinct status (sysexits EX_SOFTWARE).
         Err(_) => std::process::exit(70),
@@ -281,7 +304,7 @@ fn env_var(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{dim_prefixed, resolve_initial_message, Cli};
-    use kernel::{GateKey, GateTarget, Workflow};
+    use kernel::{GateKey, GateTarget, Registry, Step, StepBody, Workflow};
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
@@ -402,13 +425,68 @@ steps:
         assert_eq!(a.gates.len(), 2);
     }
 
+    #[test]
+    fn parses_both_step_body_forms() {
+        // A leaf names `command:`; a Composite names `workflow:`. The flat shim
+        // maps each onto the StepBody sum type.
+        match serde_yaml::from_str::<Step>("{ command: \"exit 0\" }").unwrap().body {
+            StepBody::Command(c) => assert_eq!(c, "exit 0"),
+            other => panic!("expected Command, got {other:?}"),
+        }
+        match serde_yaml::from_str::<Step>("{ workflow: reviewer }").unwrap().body {
+            StepBody::Workflow(id) => assert_eq!(id, "reviewer"),
+            other => panic!("expected Workflow, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_empty_step_body() {
+        // Both keys set is ambiguous; neither set is empty. Both must fail, so the
+        // illegal two-bodies state never reaches the engine.
+        assert!(serde_yaml::from_str::<Step>("{ command: \"x\", workflow: w }").is_err());
+        assert!(serde_yaml::from_str::<Step>("{ budget: 1 }").is_err());
+    }
+
+    #[test]
+    fn parses_a_multi_workflow_file() {
+        // The top-level surface is `root:` + `workflows:`; a Composite Step in one
+        // references another by its map key.
+        let yaml = r#"
+root: main
+workflows:
+  main:
+    entry: call
+    steps:
+      call:
+        workflow: child
+        gates:
+          - { key: 0, target: { exit: 0 } }
+  child:
+    entry: work
+    steps:
+      work:
+        command: "exit 0"
+        gates:
+          - { key: 0, target: { exit: 0 } }
+"#;
+        let reg: Registry = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(reg.root, "main");
+        assert_eq!(reg.workflows.len(), 2);
+        match &reg.workflows["main"].steps["call"].body {
+            StepBody::Workflow(id) => assert_eq!(id, "child"),
+            other => panic!("expected a Composite Step, got {other:?}"),
+        }
+    }
+
     // Guards the shipped coder example: parsing it and asserting its routing
     // keeps the file honest without invoking the LLM Steps it names.
     #[test]
     fn coder_example_wires_the_review_loop() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/coder.yaml");
         let text = std::fs::read_to_string(path).unwrap();
-        let wf: Workflow = serde_yaml::from_str(&text).unwrap();
+        let reg: Registry = serde_yaml::from_str(&text).unwrap();
+        assert_eq!(reg.root, "coder");
+        let wf = &reg.workflows["coder"];
 
         // Resolve the target a Step routes to for a given Gate key.
         let target = |step: &str, key: GateKey| -> GateTarget {
