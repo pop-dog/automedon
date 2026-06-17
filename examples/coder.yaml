@@ -18,51 +18,57 @@
 # EXIT 90 (the reserved "escalate to user" code), leaving the unstaged changes
 # and the findings file in place for a human. Un-approved code is never committed.
 
-entry: code
-default_budget: 10
+# The top-level surface is a registry: a `root:` Workflow id plus a `workflows:`
+# map. This Workflow is flat (no Composite Steps), so the map holds one entry.
+root: coder
 
-steps:
-  code:
-    # Reads TASK.md (and the findings file on loop-back), edits files, and runs
-    # its own build + test loop until green. Leaves changes unstaged. Re-emits
-    # the TASK.md path as its out-Message.
-    command: "$WORKFLOW_DIR/coder/code.sh"
-    budget: 3
-    gates:
-      - key: 0
-        target: { step: review }
-        when: code builds and tests pass — hand off for review
-      - key: "*"
-        target: { exit: 90 }
-        when: the coding agent could not produce a green build — escalate
-      - key: EXHAUSTED
-        target: { exit: 90 }
-        when: code and review did not converge within the Budget — escalate
+workflows:
+  coder:
+    entry: code
+    default_budget: 10
 
-  review:
-    # Wraps the /code-review skill: writes findings to the shared findings file,
-    # categorised Blocking vs Suggestion, and re-emits the TASK.md path.
-    command: "$WORKFLOW_DIR/coder/review.sh"
-    gates:
-      - key: 0
-        target: { step: commit }
-        when: no Blocking findings — approve
-      - key: 1
-        target: { step: code }
-        when: Blocking findings remain — send back to revise
-      - key: "*"
-        target: { exit: 90 }
-        when: the review agent failed unexpectedly — escalate
+    steps:
+      code:
+        # Reads TASK.md (and the findings file on loop-back), edits files, and
+        # runs its own build + test loop until green. Leaves changes unstaged.
+        # Re-emits the TASK.md path as its out-Message.
+        command: "$WORKFLOW_DIR/coder/code.sh"
+        budget: 3
+        gates:
+          - key: 0
+            target: { step: review }
+            when: code builds and tests pass — hand off for review
+          - key: "*"
+            target: { exit: 90 }
+            when: the coding agent could not produce a green build — escalate
+          - key: EXHAUSTED
+            target: { exit: 90 }
+            when: code and review did not converge within the Budget — escalate
 
-  commit:
-    # Writes a commit message from `git diff` + TASK.md and commits on the
-    # current branch. Never pushes.
-    command: "$WORKFLOW_DIR/coder/commit.sh"
-    budget: 1
-    gates:
-      - key: 0
-        target: { exit: 0 }
-        when: committed on the current branch — done
-      - key: "*"
-        target: { exit: 90 }
-        when: the commit failed — escalate
+      review:
+        # Wraps the /code-review skill: writes findings to the shared findings
+        # file, categorised Blocking vs Suggestion, and re-emits the TASK.md path.
+        command: "$WORKFLOW_DIR/coder/review.sh"
+        gates:
+          - key: 0
+            target: { step: commit }
+            when: no Blocking findings — approve
+          - key: 1
+            target: { step: code }
+            when: Blocking findings remain — send back to revise
+          - key: "*"
+            target: { exit: 90 }
+            when: the review agent failed unexpectedly — escalate
+
+      commit:
+        # Writes a commit message from `git diff` + TASK.md and commits on the
+        # current branch. Never pushes.
+        command: "$WORKFLOW_DIR/coder/commit.sh"
+        budget: 1
+        gates:
+          - key: 0
+            target: { exit: 0 }
+            when: committed on the current branch — done
+          - key: "*"
+            target: { exit: 90 }
+            when: the commit failed — escalate

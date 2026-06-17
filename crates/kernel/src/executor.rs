@@ -9,12 +9,13 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 
-use crate::ir::Step;
 use crate::{Sink, Stream};
 
-/// Runs one Step's command and reports back its outcome. The whole Step ABI
+/// Runs one leaf Step's command and reports back its outcome. The whole Step ABI
 /// (ADR-0003 — "a Step is any process that exits with an integer") lives behind
-/// this single method; `run` never spawns a process itself.
+/// this single method; `run` never spawns a process itself. Only leaf
+/// (`StepBody::Command`) Steps reach an executor — Composite Steps are run by the
+/// engine's Frame stack, never here — so the seam takes the command, not the Step.
 ///
 /// The Sink is passed in by `&mut` rather than carried across threads: it is not
 /// `Send`, so an executor that fans output out over worker threads must funnel
@@ -24,7 +25,7 @@ use crate::{Sink, Stream};
 pub trait StepExecutor {
     fn execute(
         &mut self,
-        step: &Step,
+        command: &str,
         in_message: &[u8],
         name: &str,
         activation: u32,
@@ -51,7 +52,7 @@ impl StepExecutor for SubprocessExecutor {
     /// opaquely.
     fn execute(
         &mut self,
-        step: &Step,
+        command: &str,
         in_message: &[u8],
         name: &str,
         activation: u32,
@@ -59,12 +60,12 @@ impl StepExecutor for SubprocessExecutor {
     ) -> (i32, Vec<u8>) {
         let mut child = Command::new("sh")
             .arg("-c")
-            .arg(&step.command)
+            .arg(command)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .unwrap_or_else(|e| panic!("failed to spawn step command {:?}: {e}", step.command));
+            .unwrap_or_else(|e| panic!("failed to spawn step command {command:?}: {e}"));
 
         // All three pipes must be serviced concurrently: stdin is fed from its own
         // thread while two reader threads drain stdout/stderr. Writing stdin to

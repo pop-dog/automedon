@@ -1,30 +1,107 @@
-//! The single-token run loop. Executes one flat Frame; nested (Composite)
-//! Workflows are not yet supported.
+//! The run loop: a stack machine over Frames. Each Frame is one activation of a
+//! Workflow; a Composite Step pushes a child Frame and surfaces its exit code to
+//! the parent. The Frame stack is realised by recursion — `run_frame` calls
+//! itself for a child — so each Frame's Budgets and activation counters are fresh
+//! locals (re-invoking a sub-Workflow starts with full Budgets) and Depth is the
+//! recursion depth.
 
 use std::collections::HashMap;
 
 use crate::event::{Event, Fault};
-use crate::ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
+use crate::ir::{Gate, GateKey, GateTarget, Registry, Step, StepBody, Workflow, DEFAULT_BUDGET};
 use crate::{Sink, StepExecutor};
 
-/// Run a flat Workflow to an Exit Gate, emitting Events to `sink`.
+/// Hardcoded max-Depth default, mirroring [`DEFAULT_BUDGET`].
+pub const DEFAULT_MAX_DEPTH: u32 = 10;
+
+/// Per-Run execution policy, distinct from a Workflow definition. Depth is a
+/// property of *running* a Workflow (how deep composition may nest), not of the
+/// Workflow itself, so it lives here rather than in the IR. `#[non_exhaustive]`
+/// so further knobs can be added without breaking callers — construct via
+/// [`RunConfig::default`] and adjust with the `with_*` setters.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct RunConfig {
+    /// Maximum Frame Depth; entering a Composite Step past this raises an
+    /// uncatchable [`Fault::DepthOverflow`].
+    pub max_depth: u32,
+}
+
+impl Default for RunConfig {
+    fn default() -> Self {
+        Self { max_depth: DEFAULT_MAX_DEPTH }
+    }
+}
+
+impl RunConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Cap Frame Depth at `max_depth`.
+    pub fn with_max_depth(mut self, max_depth: u32) -> Self {
+        self.max_depth = max_depth;
+        self
+    }
+}
+
+/// Run the registry's root Workflow to an Exit Gate, emitting Events to `sink`.
 ///
 /// `initial_message` seeds the entry Step's in-Message, letting a Run carry
-/// arguments; pass `&[]` for no input. Each Step is run through `executor` (the
-/// Step-execution seam), so routing can be driven with canned outcomes in tests
-/// and real subprocesses in production. Returns the Workflow exit code, or the
-/// Fault that prevented reaching an Exit Gate. Panics on malformed input (a
-/// Gate/entry pointing at a missing Step, or a command that fails to spawn) —
-/// those are setup bugs, not model Faults, and are not validated here.
+/// arguments; pass `&[]` for no input. Each leaf Step is run through `executor`
+/// (the Step-execution seam), so routing can be driven with canned outcomes in
+/// tests and real subprocesses in production. Returns the root Workflow's exit
+/// code, or the Fault that prevented reaching an Exit Gate. Panics on malformed
+/// input (a Gate/entry pointing at a missing Step, or a Composite Step naming a
+/// missing Workflow) — those are setup bugs, not model Faults, validated at load.
 pub fn run(
-    workflow: &Workflow,
+    registry: &Registry,
     initial_message: &[u8],
+    config: &RunConfig,
     executor: &mut dyn StepExecutor,
     sink: &mut dyn Sink,
 ) -> Result<i32, Fault> {
     sink.emit(&Event::RunStarted);
+    // The root Frame is Depth 1; a Composite push makes its child Depth 2, etc.
+    match run_frame(registry, &registry.root, 1, initial_message, config, executor, sink) {
+        Ok((code, _out)) => {
+            sink.emit(&Event::RunEnded { code });
+            Ok(code)
+        }
+        // The originating Frame already announced the Fault; it unwound to here
+        // uncaught, so the Run fails.
+        Err(fault) => Err(fault),
+    }
+}
+
+/// What a traversed Gate resolves to within a Frame.
+enum Flow<'a> {
+    /// Continue at this successor Step.
+    Goto(&'a str),
+    /// Leave the Frame with this exit code.
+    Done(i32),
+}
+
+/// Run one Frame (one activation of `id`) to an Exit Gate, returning its exit
+/// code and out-Message, or the Fault it could not handle. A Composite Step
+/// recurses into a child Frame at `depth + 1`; the child's surfaced code routes
+/// through the *parent* Composite Step's Gates exactly as a leaf's code does.
+fn run_frame(
+    registry: &Registry,
+    id: &str,
+    depth: u32,
+    in_message: &[u8],
+    config: &RunConfig,
+    executor: &mut dyn StepExecutor,
+    sink: &mut dyn Sink,
+) -> Result<(i32, Vec<u8>), Fault> {
+    let workflow: &Workflow = registry
+        .workflows
+        .get(id)
+        .unwrap_or_else(|| panic!("registry references missing workflow {id:?}"));
 
     // The Frame: per-Step remaining Budget, resolved by the cascade up front.
+    // Fresh on every entry, so re-invoking a sub-Workflow restores full Budgets.
     let mut remaining: HashMap<&str, u32> = workflow
         .steps
         .iter()
@@ -47,16 +124,19 @@ pub fn run(
         .collect();
 
     let mut current: &str = &workflow.entry;
-    let mut message: Vec<u8> = initial_message.to_vec();
+    let mut message: Vec<u8> = in_message.to_vec();
 
     loop {
         let step = workflow
             .steps
             .get(current)
-            .unwrap_or_else(|| panic!("workflow references missing step {current:?}"));
+            .unwrap_or_else(|| panic!("workflow {id:?} references missing step {current:?}"));
 
-        // Pick the Gate to traverse — either by running the Step, or, if its
-        // Budget is spent, the EXHAUSTED Gate (taken *before* the Step runs).
+        // Pick the Gate to traverse. Either the Budget is spent (the EXHAUSTED
+        // Gate, taken *before* the Step runs), or the Step produces an exit code
+        // — by running its command, or by running its child sub-Workflow to an
+        // Exit Gate — which routes through the same code/Default Gates. A child's
+        // Fault is the one path that routes through the FAULT Gate instead.
         let gate: &Gate = if remaining[current] == 0 {
             sink.emit(&Event::Exhausted { step: current.to_string() });
             match find_gate(step, &GateKey::Exhausted) {
@@ -71,55 +151,114 @@ pub fn run(
             });
             sink.emit(&Event::StepEntered { step: current.to_string() });
 
-            let activation = activations[current];
-            *activations.get_mut(current).unwrap() += 1;
-            let (code, out) = executor.execute(step, &message, current, activation, sink);
-            sink.emit(&Event::StepExited { step: current.to_string(), code });
-            message = out;
-
-            match find_gate(step, &GateKey::Code(code)).or_else(|| find_gate(step, &GateKey::Default)) {
-                Some(g) => g,
-                None => return raise(sink, Fault::UnhandledOutcome { step: current.to_string(), code }),
+            match &step.body {
+                StepBody::Command(command) => {
+                    let activation = activations[current];
+                    *activations.get_mut(current).unwrap() += 1;
+                    let (code, out) = executor.execute(command, &message, current, activation, sink);
+                    sink.emit(&Event::StepExited { step: current.to_string(), code });
+                    message = out;
+                    match route(step, code) {
+                        Some(g) => g,
+                        None => return raise(sink, Fault::UnhandledOutcome { step: current.to_string(), code }),
+                    }
+                }
+                StepBody::Workflow(child) => {
+                    // Entering a Composite Step pushes a Frame; the Depth cap is a
+                    // Run policy, and overflow is an uncatchable Fault.
+                    if depth >= config.max_depth {
+                        return raise(sink, Fault::DepthOverflow { workflow: child.clone() });
+                    }
+                    sink.emit(&Event::FramePushed {
+                        step: current.to_string(),
+                        workflow: child.clone(),
+                        depth: depth + 1,
+                    });
+                    let outcome =
+                        run_frame(registry, child, depth + 1, &message, config, executor, sink);
+                    sink.emit(&Event::FramePopped {
+                        step: current.to_string(),
+                        workflow: child.clone(),
+                    });
+                    match outcome {
+                        Ok((code, out)) => {
+                            // The child reached an Exit Gate; surface its code and
+                            // route it through the parent exactly as a leaf's.
+                            sink.emit(&Event::StepExited { step: current.to_string(), code });
+                            message = out;
+                            match route(step, code) {
+                                Some(g) => g,
+                                None => return raise(sink, Fault::UnhandledOutcome { step: current.to_string(), code }),
+                            }
+                        }
+                        Err(fault) => {
+                            // Depth overflow is never offered to a FAULT Gate.
+                            if matches!(fault, Fault::DepthOverflow { .. }) {
+                                return Err(fault);
+                            }
+                            // Present the child's Fault to this Composite Step's
+                            // FAULT Gate; absent, the Fault bubbles (this Frame
+                            // faults too, unwinding toward the nearest handler).
+                            match find_gate(step, &GateKey::Fault) {
+                                Some(g) => g,
+                                None => return Err(fault),
+                            }
+                        }
+                    }
+                }
             }
         };
 
-        sink.emit(&Event::GateTaken {
-            step: current.to_string(),
-            key: gate.key.clone(),
-            target: gate.target.clone(),
-        });
-
-        match &gate.target {
-            GateTarget::Step(next) => {
-                sink.emit(&Event::MessagePassed {
-                    from: current.to_string(),
-                    to: next.clone(),
-                    bytes: message.len(),
-                });
-                current = next;
-            }
-            GateTarget::Exit(code) => {
-                sink.emit(&Event::RunEnded { code: *code });
-                return Ok(*code);
-            }
+        match act_on_gate(sink, current, gate, &message) {
+            Flow::Goto(next) => current = next,
+            Flow::Done(code) => return Ok((code, message)),
         }
     }
+}
+
+/// Select the Gate a leaf/Composite exit `code` unlocks: an exact `Code`, else
+/// the `Default` Gate (which catches unmatched integers only).
+fn route(step: &Step, code: i32) -> Option<&Gate> {
+    find_gate(step, &GateKey::Code(code)).or_else(|| find_gate(step, &GateKey::Default))
 }
 
 fn find_gate<'a>(step: &'a Step, key: &GateKey) -> Option<&'a Gate> {
     step.gates.iter().find(|g| &g.key == key)
 }
 
-fn raise(sink: &mut dyn Sink, fault: Fault) -> Result<i32, Fault> {
+/// Traverse `gate`: announce it, and either move to its successor Step (passing
+/// the Message) or leave the Frame with its Exit code.
+fn act_on_gate<'a>(sink: &mut dyn Sink, current: &str, gate: &'a Gate, message: &[u8]) -> Flow<'a> {
+    sink.emit(&Event::GateTaken {
+        step: current.to_string(),
+        key: gate.key.clone(),
+        target: gate.target.clone(),
+    });
+    match &gate.target {
+        GateTarget::Step(next) => {
+            sink.emit(&Event::MessagePassed {
+                from: current.to_string(),
+                to: next.clone(),
+                bytes: message.len(),
+            });
+            Flow::Goto(next)
+        }
+        GateTarget::Exit(code) => Flow::Done(*code),
+    }
+}
+
+fn raise(sink: &mut dyn Sink, fault: Fault) -> Result<(i32, Vec<u8>), Fault> {
     sink.emit(&Event::FaultRaised { fault: fault.clone() });
     Err(fault)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::run;
+    use std::collections::HashMap;
+
+    use super::{run, RunConfig};
     use crate::event::{Event, Fault};
-    use crate::ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
+    use crate::ir::{Gate, GateKey, GateTarget, Registry, Step, StepBody, Workflow, DEFAULT_BUDGET};
     use crate::{Sink, StepExecutor, Stream, SubprocessExecutor};
 
     /// A Sink that records every emitted Event and every output chunk for
@@ -173,7 +312,7 @@ mod tests {
     impl StepExecutor for CannedExecutor {
         fn execute(
             &mut self,
-            _step: &Step,
+            _command: &str,
             _in_message: &[u8],
             name: &str,
             activation: u32,
@@ -196,7 +335,13 @@ mod tests {
     }
 
     fn step(command: &str, budget: Option<u32>, gates: Vec<Gate>) -> Step {
-        Step { command: command.into(), budget, gates }
+        Step { body: StepBody::Command(command.into()), budget, gates }
+    }
+
+    /// A Composite Step: enter the named child Workflow, with `gates` routing its
+    /// surfaced exit code (or, via a FAULT Gate, its Fault).
+    fn composite(child: &str, budget: Option<u32>, gates: Vec<Gate>) -> Step {
+        Step { body: StepBody::Workflow(child.into()), budget, gates }
     }
 
     fn workflow(entry: &str, default_budget: Option<u32>, steps: Vec<(&str, Step)>) -> Workflow {
@@ -205,6 +350,30 @@ mod tests {
             default_budget,
             steps: steps.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
         }
+    }
+
+    /// Wrap a single Workflow as the root of a registry, so the flat-Workflow
+    /// tests drive the registry-based engine unchanged.
+    fn single(wf: Workflow) -> Registry {
+        Registry { root: "main".into(), workflows: HashMap::from([("main".to_string(), wf)]) }
+    }
+
+    /// Build a registry from `(id, Workflow)` pairs rooted at the first id.
+    fn registry(root: &str, workflows: Vec<(&str, Workflow)>) -> Registry {
+        Registry {
+            root: root.into(),
+            workflows: workflows.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        }
+    }
+
+    /// Drive a single flat Workflow with default config, the common test path.
+    fn drive(
+        wf: Workflow,
+        msg: &[u8],
+        exec: &mut dyn StepExecutor,
+        sink: &mut dyn Sink,
+    ) -> Result<i32, Fault> {
+        run(&single(wf), msg, &RunConfig::default(), exec, sink)
     }
 
     fn entered(sink: &MockSink) -> usize {
@@ -249,7 +418,7 @@ mod tests {
         );
         let mut exec = CannedExecutor::returning("s", 0);
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &[], &mut exec, &mut sink).unwrap(), 10);
+        assert_eq!(drive(wf, &[], &mut exec, &mut sink).unwrap(), 10);
     }
 
     #[test]
@@ -271,7 +440,7 @@ mod tests {
         );
         let mut exec = CannedExecutor::returning("s", 5);
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &[], &mut exec, &mut sink).unwrap(), 99);
+        assert_eq!(drive(wf, &[], &mut exec, &mut sink).unwrap(), 99);
     }
 
     #[test]
@@ -294,7 +463,7 @@ mod tests {
         );
         let mut exec = CannedExecutor::returning("loop", 1);
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &[], &mut exec, &mut sink).unwrap(), 42);
+        assert_eq!(drive(wf, &[], &mut exec, &mut sink).unwrap(), 42);
 
         // The Step runs exactly Budget times, then Exhaustion fires once.
         assert_eq!(entered(&sink), 3);
@@ -324,7 +493,7 @@ mod tests {
         );
         let mut exec = CannedExecutor::returning("s", 7);
         let mut sink = MockSink::default();
-        match run(&wf, &[], &mut exec, &mut sink) {
+        match drive(wf, &[], &mut exec, &mut sink) {
             Err(Fault::UnhandledOutcome { step, code }) => {
                 assert_eq!(step, "s");
                 assert_eq!(code, 7);
@@ -347,7 +516,7 @@ mod tests {
         );
         let mut exec = CannedExecutor::returning("loop", 1);
         let mut sink = MockSink::default();
-        match run(&wf, &[], &mut exec, &mut sink) {
+        match drive(wf, &[], &mut exec, &mut sink) {
             Err(Fault::UnhandledExhaustion { step }) => assert_eq!(step, "loop"),
             other => panic!("expected UnhandledExhaustion, got {other:?}"),
         }
@@ -361,17 +530,17 @@ mod tests {
 
         // Step Budget overrides the Workflow default.
         let mut sink = MockSink::default();
-        run(&looping_workflow(Some(5), Some(2)), &[], &mut exec, &mut sink).unwrap();
+        drive(looping_workflow(Some(5), Some(2)), &[], &mut exec, &mut sink).unwrap();
         assert_eq!(entered(&sink), 2);
 
         // Workflow default applies when the Step has no Budget.
         let mut sink = MockSink::default();
-        run(&looping_workflow(Some(3), None), &[], &mut exec, &mut sink).unwrap();
+        drive(looping_workflow(Some(3), None), &[], &mut exec, &mut sink).unwrap();
         assert_eq!(entered(&sink), 3);
 
         // The hardcoded default applies when neither is set.
         let mut sink = MockSink::default();
-        run(&looping_workflow(None, None), &[], &mut exec, &mut sink).unwrap();
+        drive(looping_workflow(None, None), &[], &mut exec, &mut sink).unwrap();
         assert_eq!(entered(&sink), DEFAULT_BUDGET as usize);
     }
 
@@ -386,7 +555,7 @@ mod tests {
         );
         let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        run(&wf, &[], &mut exec, &mut sink).unwrap();
+        drive(wf, &[], &mut exec, &mut sink).unwrap();
         assert_eq!(captured(&sink, "s", Stream::Stderr), b"boom\n");
     }
 
@@ -401,7 +570,7 @@ mod tests {
         );
         let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        run(&wf, &[], &mut exec, &mut sink).unwrap();
+        drive(wf, &[], &mut exec, &mut sink).unwrap();
         assert_eq!(captured(&sink, "s", Stream::Stdout), b"hello\n");
     }
 
@@ -426,7 +595,7 @@ mod tests {
         );
         let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        run(&wf, &[], &mut exec, &mut sink).unwrap();
+        drive(wf, &[], &mut exec, &mut sink).unwrap();
         let activations: Vec<u32> = sink
             .outputs
             .iter()
@@ -458,7 +627,7 @@ mod tests {
         thread::spawn(move || {
             let mut exec = SubprocessExecutor::new();
             let mut sink = MockSink::default();
-            let code = run(&wf, &big, &mut exec, &mut sink).unwrap();
+            let code = drive(wf, &big, &mut exec, &mut sink).unwrap();
             let echoed = captured(&sink, "cat", Stream::Stdout).len();
             let _ = tx.send((code, echoed));
         });
@@ -496,7 +665,7 @@ mod tests {
         );
         let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, &[], &mut exec, &mut sink).unwrap(), 0);
+        assert_eq!(drive(wf, &[], &mut exec, &mut sink).unwrap(), 0);
     }
 
     #[test]
@@ -520,6 +689,237 @@ mod tests {
         );
         let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
-        assert_eq!(run(&wf, b"5", &mut exec, &mut sink).unwrap(), 0);
+        assert_eq!(drive(wf, b"5", &mut exec, &mut sink).unwrap(), 0);
+    }
+
+    /// Index of the first Event satisfying `pred`, for asserting relative order.
+    fn position(sink: &MockSink, pred: impl Fn(&Event) -> bool) -> usize {
+        sink.events.iter().position(pred).expect("expected event not emitted")
+    }
+
+    #[test]
+    fn composite_step_surfaces_child_exit_code_and_routes_in_parent() {
+        // The child reaches an Exit Gate with code 7; the parent's Composite Step
+        // routes that surfaced code exactly as it would a leaf's exit code.
+        let child = workflow(
+            "work",
+            None,
+            vec![("work", step("noop", None, vec![gate(GateKey::Code(7), GateTarget::Exit(7))]))],
+        );
+        let parent = workflow(
+            "call",
+            None,
+            vec![("call", composite("child", None, vec![gate(GateKey::Code(7), GateTarget::Exit(100))]))],
+        );
+        let reg = registry("main", vec![("main", parent), ("child", child)]);
+        let mut exec = CannedExecutor::returning("work", 7);
+        let mut sink = MockSink::default();
+        assert_eq!(run(&reg, &[], &RunConfig::default(), &mut exec, &mut sink).unwrap(), 100);
+    }
+
+    #[test]
+    fn composite_step_emits_the_frame_bracket_in_order() {
+        // A Composite Step brackets the child Frame: StepEntered -> FramePushed ->
+        // (child) -> FramePopped -> StepExited{surfaced code}.
+        let child = workflow(
+            "work",
+            None,
+            vec![("work", step("noop", None, vec![gate(GateKey::Code(0), GateTarget::Exit(3))]))],
+        );
+        let parent = workflow(
+            "call",
+            None,
+            vec![("call", composite("sub", None, vec![gate(GateKey::Code(3), GateTarget::Exit(0))]))],
+        );
+        let reg = registry("main", vec![("main", parent), ("sub", child)]);
+        let mut exec = CannedExecutor::returning("work", 0);
+        let mut sink = MockSink::default();
+        run(&reg, &[], &RunConfig::default(), &mut exec, &mut sink).unwrap();
+
+        let entered = position(&sink, |e| matches!(e, Event::StepEntered { step } if step == "call"));
+        let pushed = position(&sink, |e| matches!(e, Event::FramePushed { step, .. } if step == "call"));
+        let popped = position(&sink, |e| matches!(e, Event::FramePopped { step, .. } if step == "call"));
+        let exited = position(&sink, |e| matches!(e, Event::StepExited { step, code } if step == "call" && *code == 3));
+        assert!(entered < pushed && pushed < popped && popped < exited, "frame bracket out of order");
+    }
+
+    #[test]
+    fn each_sub_workflow_invocation_gets_fresh_budgets() {
+        // The child's leaf always fails under a Budget of 2, exhausting to its
+        // Exit Gate. The parent invokes the child twice; if Budget lived anywhere
+        // but the Frame, the second invocation would start spent and never run the
+        // leaf. Four leaf activations prove Budget resets per Frame.
+        let child = workflow(
+            "task",
+            None,
+            vec![(
+                "task",
+                step(
+                    "fail",
+                    Some(2),
+                    vec![
+                        gate(GateKey::Default, GateTarget::Step("task".into())),
+                        gate(GateKey::Exhausted, GateTarget::Exit(0)),
+                    ],
+                ),
+            )],
+        );
+        let parent = workflow(
+            "first",
+            None,
+            vec![
+                ("first", composite("sub", None, vec![gate(GateKey::Code(0), GateTarget::Step("second".into()))])),
+                ("second", composite("sub", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))])),
+            ],
+        );
+        let reg = registry("main", vec![("main", parent), ("sub", child)]);
+        let mut exec = CannedExecutor::returning("task", 1);
+        let mut sink = MockSink::default();
+        assert_eq!(run(&reg, &[], &RunConfig::default(), &mut exec, &mut sink).unwrap(), 0);
+
+        let leaf_runs = sink
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::StepEntered { step } if step == "task"))
+            .count();
+        assert_eq!(leaf_runs, 4, "each sub-Workflow invocation re-runs the leaf to its full Budget");
+    }
+
+    #[test]
+    fn fault_gate_catches_a_childs_fault() {
+        // The child faults (an exit code no Gate covers); the parent's FAULT Gate
+        // is the catch clause, recovering to its own Exit code.
+        let child = workflow(
+            "boom",
+            None,
+            vec![("boom", step("x", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+        let parent = workflow(
+            "call",
+            None,
+            vec![("call", composite("sub", None, vec![gate(GateKey::Fault, GateTarget::Exit(55))]))],
+        );
+        let reg = registry("main", vec![("main", parent), ("sub", child)]);
+        let mut exec = CannedExecutor::returning("boom", 9);
+        let mut sink = MockSink::default();
+        assert_eq!(run(&reg, &[], &RunConfig::default(), &mut exec, &mut sink).unwrap(), 55);
+    }
+
+    #[test]
+    fn child_fault_bubbles_when_parent_has_no_fault_gate() {
+        // With no FAULT Gate, the child's Fault unwinds frame-by-frame; reaching
+        // the root uncaught, it fails the Run carrying its origin.
+        let child = workflow(
+            "boom",
+            None,
+            vec![("boom", step("x", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+        let parent = workflow(
+            "call",
+            None,
+            vec![("call", composite("sub", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+        let reg = registry("main", vec![("main", parent), ("sub", child)]);
+        let mut exec = CannedExecutor::returning("boom", 9);
+        let mut sink = MockSink::default();
+        match run(&reg, &[], &RunConfig::default(), &mut exec, &mut sink) {
+            Err(Fault::UnhandledOutcome { step, code }) => {
+                assert_eq!(step, "boom");
+                assert_eq!(code, 9);
+            }
+            other => panic!("expected the child's Fault to bubble, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn self_reference_trips_the_uncatchable_depth_cap() {
+        // A Workflow that names itself recurses until the Depth cap. The FAULT
+        // Gate must NOT catch the resulting DepthOverflow — it is uncatchable —
+        // so the Run fails carrying the offending child id.
+        let deep = workflow(
+            "recurse",
+            None,
+            vec![("recurse", composite("deep", None, vec![gate(GateKey::Fault, GateTarget::Exit(0))]))],
+        );
+        let reg = registry("deep", vec![("deep", deep)]);
+        let mut exec = CannedExecutor::default();
+        let mut sink = MockSink::default();
+        let config = RunConfig::default().with_max_depth(3);
+        match run(&reg, &[], &config, &mut exec, &mut sink) {
+            Err(Fault::DepthOverflow { workflow }) => assert_eq!(workflow, "deep"),
+            other => panic!("expected DepthOverflow, got {other:?}"),
+        }
+        // The cap held: only Frames up to the limit were pushed (Depths 2 and 3).
+        let pushes = sink.events.iter().filter(|e| matches!(e, Event::FramePushed { .. })).count();
+        assert_eq!(pushes, 2);
+    }
+
+    #[test]
+    fn composite_step_threads_the_message_through_the_child() {
+        // The Composite Step's in-Message seeds the child's entry Step, and the
+        // child's Exit-Gate out-Message becomes the Composite Step's out-Message:
+        // `cat` echoes the seed back out of the child, and the parent's successor
+        // exits with the number it reads — reaching 0 proves the round trip.
+        let child = workflow(
+            "echo_in",
+            None,
+            vec![("echo_in", step("cat", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+        let parent = workflow(
+            "call",
+            None,
+            vec![
+                ("call", composite("sub", None, vec![gate(GateKey::Code(0), GateTarget::Step("consume".into()))])),
+                (
+                    "consume",
+                    step(
+                        "read n; exit \"$n\"",
+                        None,
+                        vec![
+                            gate(GateKey::Code(5), GateTarget::Exit(0)),
+                            gate(GateKey::Default, GateTarget::Exit(1)),
+                        ],
+                    ),
+                ),
+            ],
+        );
+        let reg = registry("main", vec![("main", parent), ("sub", child)]);
+        let mut exec = SubprocessExecutor::new();
+        let mut sink = MockSink::default();
+        assert_eq!(run(&reg, b"5", &RunConfig::default(), &mut exec, &mut sink).unwrap(), 0);
+    }
+
+    #[test]
+    fn composite_step_budget_exhaustion_routes_before_pushing() {
+        // A Composite Step's Budget lives in its parent Frame and is spent per
+        // entry; once spent, the EXHAUSTED Gate fires *instead of* pushing a child
+        // Frame, so the child never runs.
+        let child = workflow(
+            "work",
+            None,
+            vec![("work", step("noop", None, vec![gate(GateKey::Code(0), GateTarget::Exit(0))]))],
+        );
+        let parent = workflow(
+            "call",
+            None,
+            vec![(
+                "call",
+                composite(
+                    "sub",
+                    Some(1),
+                    vec![
+                        gate(GateKey::Code(0), GateTarget::Step("call".into())),
+                        gate(GateKey::Exhausted, GateTarget::Exit(7)),
+                    ],
+                ),
+            )],
+        );
+        let reg = registry("main", vec![("main", parent), ("sub", child)]);
+        let mut exec = CannedExecutor::returning("work", 0);
+        let mut sink = MockSink::default();
+        assert_eq!(run(&reg, &[], &RunConfig::default(), &mut exec, &mut sink).unwrap(), 7);
+        // The Composite Step entered once (Budget 1); the child ran exactly once.
+        let pushes = sink.events.iter().filter(|e| matches!(e, Event::FramePushed { .. })).count();
+        assert_eq!(pushes, 1);
     }
 }

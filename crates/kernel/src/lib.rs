@@ -3,10 +3,11 @@
 //! emits Events. It is LLM- and data-agnostic. Modules (Sinks, an LLM adapter)
 //! live outside and depend on the Kernel, never the reverse.
 //!
-//! Current scope: a single flat Frame, subprocess Steps, `integer | * |
-//! EXHAUSTED | EXIT` routing, per-Step Budget + Exhaustion, and unhandled-outcome
-//! Faults that abort the Run. Not yet implemented: the Frame stack, Composite
-//! Steps, Depth, and catching Faults at a Frame boundary.
+//! Current scope: a Frame stack over a Workflow registry (Composite Steps run a
+//! named child sub-Workflow and surface its code), subprocess leaf Steps,
+//! `integer | * | EXHAUSTED | FAULT | EXIT` routing, per-Frame Budget +
+//! Exhaustion, a Run-level Depth cap, and structured Fault propagation across
+//! Frame boundaries.
 
 mod event;
 mod executor;
@@ -15,8 +16,10 @@ mod run;
 
 pub use event::{Event, Fault};
 pub use executor::{StepExecutor, SubprocessExecutor};
-pub use ir::{Gate, GateKey, GateTarget, Step, Workflow, DEFAULT_BUDGET};
-pub use run::run;
+pub use ir::{
+    Gate, GateKey, GateTarget, Registry, Step, StepBody, Workflow, WorkflowId, DEFAULT_BUDGET,
+};
+pub use run::{run, RunConfig, DEFAULT_MAX_DEPTH};
 
 use serde::Serialize;
 
@@ -44,10 +47,11 @@ pub trait Sink {
     }
 }
 
-/// Where a [`Workflow`] comes from — the IR-as-interface boundary. The Kernel
+/// Where a [`Registry`] comes from — the IR-as-interface boundary. The Kernel
 /// owns the IR types; this trait abstracts the source. YAML is the first impl
 /// (in `orchestrator`); JSON or a code-builder could be added without touching
-/// the Kernel.
+/// the Kernel. How references resolve to ids — within one file now, across files
+/// later — is entirely a source concern (ADR-0008).
 pub trait WorkflowSource {
-    fn load(&self) -> Result<Workflow, Box<dyn std::error::Error>>;
+    fn load(&self) -> Result<Registry, Box<dyn std::error::Error>>;
 }

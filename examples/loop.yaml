@@ -8,27 +8,31 @@
 #
 # Run:  cargo run -p orchestrator -- examples/loop.yaml ; echo "exit=$?"
 
-entry: greet
-default_budget: 10
+root: loop
 
-steps:
-  greet:
-    command: 'echo ''{"attempt": 0}'''
-    gates:
-      - key: 0
-        target: { step: retry }
-        when: greeting emitted
+workflows:
+  loop:
+    entry: greet
+    default_budget: 10
 
-  retry:
-    command: 'cat; echo "  (retry saw the message above) " >&2; exit 1'
-    budget: 3
-    gates:
-      - key: 0
-        target: { exit: 0 }
-        when: success
-      - key: "*"
-        target: { step: retry }
-        when: any failure — loop and try again
-      - key: EXHAUSTED
-        target: { exit: 42 }
-        when: gave up after the Budget was spent
+    steps:
+      greet:
+        command: 'echo ''{"attempt": 0}'''
+        gates:
+          - key: 0
+            target: { step: retry }
+            when: greeting emitted
+
+      retry:
+        command: 'cat; echo "  (retry saw the message above) " >&2; exit 1'
+        budget: 3
+        gates:
+          - key: 0
+            target: { exit: 0 }
+            when: success
+          - key: "*"
+            target: { step: retry }
+            when: any failure — loop and try again
+          - key: EXHAUSTED
+            target: { exit: 42 }
+            when: gave up after the Budget was spent

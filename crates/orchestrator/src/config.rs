@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use kernel::DEFAULT_MAX_DEPTH;
+
 /// Application subdirectory under the chosen state root.
 const APP_DIR: &str = "agent-orchestrator";
 
@@ -44,9 +46,21 @@ pub fn resolve_keep(flag: Option<&str>, env: Option<&str>) -> usize {
         .max(1)
 }
 
+/// Resolve the max Frame Depth: a `--max-depth`/env value if it parses, else
+/// [`kernel::DEFAULT_MAX_DEPTH`]. Like [`resolve_keep`], an unparseable override
+/// falls back to the default rather than failing the Run. The cap is at least 1:
+/// the root Frame is Depth 1, so a 0 cap could never run even a flat Workflow.
+pub fn resolve_max_depth(flag: Option<&str>, env: Option<&str>) -> u32 {
+    flag.or(env)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_MAX_DEPTH)
+        .max(1)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{resolve_keep, runs_dir, DEFAULT_KEEP};
+    use super::{resolve_keep, resolve_max_depth, runs_dir, DEFAULT_KEEP};
+    use kernel::DEFAULT_MAX_DEPTH;
     use std::path::PathBuf;
 
     #[test]
@@ -85,5 +99,23 @@ mod tests {
         // newest entry, and pruning keeps the newest `keep`).
         assert_eq!(resolve_keep(Some("0"), None), 1);
         assert_eq!(resolve_keep(None, Some("0")), 1);
+    }
+
+    #[test]
+    fn max_depth_prefers_flag_then_env_then_default() {
+        assert_eq!(resolve_max_depth(Some("3"), Some("9")), 3);
+        assert_eq!(resolve_max_depth(None, Some("9")), 9);
+        assert_eq!(resolve_max_depth(None, None), DEFAULT_MAX_DEPTH);
+    }
+
+    #[test]
+    fn unparseable_max_depth_falls_back_to_default() {
+        assert_eq!(resolve_max_depth(Some("deep"), None), DEFAULT_MAX_DEPTH);
+    }
+
+    #[test]
+    fn max_depth_is_clamped_to_at_least_one() {
+        // The root Frame is Depth 1; a 0 cap would reject every Workflow.
+        assert_eq!(resolve_max_depth(Some("0"), None), 1);
     }
 }
