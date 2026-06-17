@@ -1,4 +1,4 @@
-# The agentic coder: a flat `code -> review -> commit` Workflow whose three Steps
+# The agentic coder: a Composite `develop -> commit` Workflow whose leaf Steps
 # are bespoke LLM agents (`claude -p`). The entry Message is the path to a
 # TASK.md file; each Step re-emits that path on stdout so it propagates to its
 # successor. Only the small path rides the Message channel — the bulk (the task
@@ -13,17 +13,55 @@
 # the cwd is left as that repo. They also expect `claude`, and (for the build
 # check) `cargo`, on PATH.
 #
-# The code <-> review loop is bounded by `code`'s Budget. If review still reports
-# Blocking findings when that Budget is spent, the EXHAUSTED Gate escalates with
-# EXIT 90 (the reserved "escalate to user" code), leaving the unstaged changes
-# and the findings file in place for a human. Un-approved code is never committed.
+# Structure: the top-level `coder` Workflow is `develop -> commit`, where
+# `develop` is a Composite Step running the `develop` sub-Workflow — the
+# `code <-> review` loop. The build/test gate lives in `code` (the only Step that
+# can act on a failure by editing), so `develop` only ever surfaces green,
+# reviewed code; `commit` need not re-verify it. The `develop` loop is bounded by
+# `code`'s Budget: if review still reports Blocking findings when that Budget is
+# spent, the child's EXHAUSTED Gate exits 90, which surfaces to the parent and
+# escalates the Run (the reserved "escalate to user" code), leaving the unstaged
+# changes and the findings file in place for a human. Un-approved code is never
+# committed.
 
 # The top-level surface is a registry: a `root:` Workflow id plus a `workflows:`
-# map. This Workflow is flat (no Composite Steps), so the map holds one entry.
+# map. A Composite Step's `workflow:` names another entry in this map.
 root: coder
 
 workflows:
   coder:
+    entry: develop
+
+    steps:
+      develop:
+        # Composite Step: run the `develop` sub-Workflow (code <-> review) to its
+        # Exit Gate. Its surfaced exit code routes here exactly as a leaf Step's
+        # would — 0 means reviewed, green code ready to commit.
+        workflow: develop
+        budget: 1
+        gates:
+          - key: 0
+            target: { step: commit }
+            when: code reviewed clean and green — hand off to commit
+          - key: "*"
+            target: { exit: 90 }
+            when: develop escalated (build failed or review did not converge) — escalate
+
+      commit:
+        # Writes a commit message from `git diff` + TASK.md and commits on the
+        # current branch. Never pushes. The diff it commits is the exact tree the
+        # `code` Step already built and tested, so it does not re-verify.
+        command: "$WORKFLOW_DIR/coder/commit.sh"
+        budget: 1
+        gates:
+          - key: 0
+            target: { exit: 0 }
+            when: committed on the current branch — done
+          - key: "*"
+            target: { exit: 90 }
+            when: the commit failed — escalate
+
+  develop:
     entry: code
     default_budget: 10
 
@@ -48,27 +86,16 @@ workflows:
       review:
         # Wraps the /code-review skill: writes findings to the shared findings
         # file, categorised Blocking vs Suggestion, and re-emits the TASK.md path.
+        # On approval it traverses the sub-Workflow's Exit Gate, surfacing exit 0
+        # to the parent `develop` Step, which routes on to commit.
         command: "$WORKFLOW_DIR/coder/review.sh"
         gates:
           - key: 0
-            target: { step: commit }
-            when: no Blocking findings — approve
+            target: { exit: 0 }
+            when: no Blocking findings — approve and surface to the parent
           - key: 1
             target: { step: code }
             when: Blocking findings remain — send back to revise
           - key: "*"
             target: { exit: 90 }
             when: the review agent failed unexpectedly — escalate
-
-      commit:
-        # Writes a commit message from `git diff` + TASK.md and commits on the
-        # current branch. Never pushes.
-        command: "$WORKFLOW_DIR/coder/commit.sh"
-        budget: 1
-        gates:
-          - key: 0
-            target: { exit: 0 }
-            when: committed on the current branch — done
-          - key: "*"
-            target: { exit: 90 }
-            when: the commit failed — escalate

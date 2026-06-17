@@ -481,15 +481,14 @@ workflows:
     // Guards the shipped coder example: parsing it and asserting its routing
     // keeps the file honest without invoking the LLM Steps it names.
     #[test]
-    fn coder_example_wires_the_review_loop() {
+    fn coder_example_wires_the_composite_develop_loop() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/coder.yaml");
         let text = std::fs::read_to_string(path).unwrap();
         let reg: Registry = serde_yaml::from_str(&text).unwrap();
         assert_eq!(reg.root, "coder");
-        let wf = &reg.workflows["coder"];
 
-        // Resolve the target a Step routes to for a given Gate key.
-        let target = |step: &str, key: GateKey| -> GateTarget {
+        // Resolve the target a Step in a given Workflow routes to for a Gate key.
+        let target = |wf: &Workflow, step: &str, key: GateKey| -> GateTarget {
             wf.steps[step]
                 .gates
                 .iter()
@@ -501,15 +500,27 @@ workflows:
         let routes_to_step = |t: GateTarget, name: &str| matches!(t, GateTarget::Step(s) if s == name);
         let exits_with = |t: GateTarget, code: i32| matches!(t, GateTarget::Exit(c) if c == code);
 
-        assert_eq!(wf.entry, "code");
-        // The loop is bounded by code's Budget; exhausting it escalates.
-        assert_eq!(wf.steps["code"].budget, Some(3));
-        assert!(routes_to_step(target("code", GateKey::Code(0)), "review"));
-        assert!(exits_with(target("code", GateKey::Exhausted), 90));
-        // Review approves forward to commit, or sends a Blocking verdict back to code.
-        assert!(routes_to_step(target("review", GateKey::Code(0)), "commit"));
-        assert!(routes_to_step(target("review", GateKey::Code(1)), "code"));
-        // Commit terminates the Run.
-        assert!(exits_with(target("commit", GateKey::Code(0)), 0));
+        // Top level: `develop` (a Composite Step over the `develop` sub-Workflow)
+        // hands off to `commit`; any non-zero surfaced code escalates.
+        let coder = &reg.workflows["coder"];
+        assert_eq!(coder.entry, "develop");
+        match &coder.steps["develop"].body {
+            StepBody::Workflow(id) => assert_eq!(id, "develop"),
+            other => panic!("expected develop to be a Composite Step, got {other:?}"),
+        }
+        assert!(routes_to_step(target(coder, "develop", GateKey::Code(0)), "commit"));
+        assert!(exits_with(target(coder, "develop", GateKey::Default), 90));
+        assert!(exits_with(target(coder, "commit", GateKey::Code(0)), 0));
+
+        // The sub-Workflow is the code <-> review loop, bounded by code's Budget.
+        // Review approval exits 0 (surfacing to the parent), so it never names a
+        // parent Step; a Blocking verdict loops back to code.
+        let develop = &reg.workflows["develop"];
+        assert_eq!(develop.entry, "code");
+        assert_eq!(develop.steps["code"].budget, Some(3));
+        assert!(routes_to_step(target(develop, "code", GateKey::Code(0)), "review"));
+        assert!(exits_with(target(develop, "code", GateKey::Exhausted), 90));
+        assert!(exits_with(target(develop, "review", GateKey::Code(0)), 0));
+        assert!(routes_to_step(target(develop, "review", GateKey::Code(1)), "code"));
     }
 }
