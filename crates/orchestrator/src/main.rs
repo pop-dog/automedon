@@ -124,57 +124,82 @@ fn resolve_initial_message(flag: Option<String>, stdin: Option<Vec<u8>>) -> Vec<
     }
 }
 
-/// Flags that consume the following argument as their value. Used to skip past
-/// `<flag> <value>` pairs when locating the positional Workflow path.
-const VALUE_FLAGS: &[&str] = &["--message", "--log-dir", "--keep"];
-
-/// Pull the value of `<flag> <value>` out of the argument list, if present.
-fn flag_value(args: &[String], flag: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == flag)
-        .and_then(|i| args.get(i + 1).cloned())
+/// The parsed command-line invocation. Holds raw flag values verbatim; the
+/// precedence rules (flag vs piped stdin, flag vs env) stay in their own pure
+/// resolvers (`resolve_initial_message`, `config::runs_dir`,
+/// `config::resolve_keep`) so this stays a parse, not a policy.
+#[derive(Debug, PartialEq)]
+struct Cli {
+    path: PathBuf,
+    message: Option<String>,
+    quiet: bool,
+    log_dir: Option<String>,
+    keep: Option<String>,
 }
 
-/// Pull the value of `--message <text>` out of the argument list, if present.
-fn message_flag(args: &[String]) -> Option<String> {
-    flag_value(args, "--message")
-}
+/// The invocation is missing the positional Workflow path.
+#[derive(Debug, PartialEq)]
+struct UsageError;
 
-/// Whether a boolean flag is present anywhere in the argument list.
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|a| a == flag)
-}
+impl Cli {
+    /// Parse an argument vector (argv minus the program name). Defined over a
+    /// `&[String]` with no argv/stdin access of its own so it is unit-testable.
+    fn parse(args: &[String]) -> Result<Cli, UsageError> {
+        let mut path: Option<PathBuf> = None;
+        let mut message = None;
+        let mut quiet = false;
+        let mut log_dir = None;
+        let mut keep = None;
 
-/// The first positional argument (the Workflow path), skipping flags and the
-/// values of value-taking flags so `orchestrator -q wf.yaml` still locates it.
-fn workflow_path(args: &[String]) -> Option<&str> {
-    let mut i = 0;
-    while i < args.len() {
-        let arg = &args[i];
-        if VALUE_FLAGS.contains(&arg.as_str()) {
-            i += 2; // skip the flag and its value
-        } else if arg.starts_with('-') {
-            i += 1; // a boolean flag
-        } else {
-            return Some(arg);
+        // Each flag's spelling and whether it consumes the next argument as its
+        // value are defined only here — one source of truth for the flag vocabulary.
+        let mut i = 0;
+        while i < args.len() {
+            let arg = args[i].as_str();
+            let value = || args.get(i + 1).cloned();
+            match arg {
+                "--message" => {
+                    message = value();
+                    i += 2;
+                }
+                "--log-dir" => {
+                    log_dir = value();
+                    i += 2;
+                }
+                "--keep" => {
+                    keep = value();
+                    i += 2;
+                }
+                "-q" | "--quiet" => {
+                    quiet = true;
+                    i += 1;
+                }
+                _ if arg.starts_with('-') => i += 1,
+                _ => {
+                    path.get_or_insert_with(|| PathBuf::from(arg));
+                    i += 1;
+                }
+            }
+        }
+
+        match path {
+            Some(path) => Ok(Cli { path, message, quiet, log_dir, keep }),
+            None => Err(UsageError),
         }
     }
-    None
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    let path = match workflow_path(&args) {
-        Some(p) => PathBuf::from(p),
-        None => {
-            eprintln!(
-                "usage: orchestrator <workflow.yaml> [--message <text>] \
-                 [-q|--quiet] [--log-dir <dir>] [--keep <n>]"
-            );
-            std::process::exit(2);
-        }
-    };
+    let cli = Cli::parse(&args).unwrap_or_else(|UsageError| {
+        eprintln!(
+            "usage: orchestrator <workflow.yaml> [--message <text>] \
+             [-q|--quiet] [--log-dir <dir>] [--keep <n>]"
+        );
+        std::process::exit(2);
+    });
+    let path = cli.path;
 
     // Expose the workflow definition's directory as $WORKFLOW_DIR so a Step can
     // locate the scripts it names (e.g. `command: "$WORKFLOW_DIR/fetch.sh"`)
@@ -205,27 +230,26 @@ fn main() {
         std::io::stdin().read_to_end(&mut buf).ok().map(|_| buf)
     };
 
-    let initial_message = resolve_initial_message(message_flag(&args), piped_stdin);
+    let initial_message = resolve_initial_message(cli.message, piped_stdin);
 
     // Choose the runs directory, then mint this Run's UUIDv7 ID and hand its
     // directory to the file Sink. The Kernel stays unaware of Run identity
     // (ADR-0009).
-    let log_override = flag_value(&args, "--log-dir").or_else(|| env_var("AGENT_ORCHESTRATOR_LOG_DIR"));
+    let log_override = cli.log_dir.or_else(|| env_var("AGENT_ORCHESTRATOR_LOG_DIR"));
     let runs_dir = config::runs_dir(
         log_override.as_deref(),
         env_var("XDG_STATE_HOME").as_deref(),
         env_var("HOME").as_deref(),
     );
     let keep = config::resolve_keep(
-        flag_value(&args, "--keep").as_deref(),
+        cli.keep.as_deref(),
         env_var("AGENT_ORCHESTRATOR_KEEP").as_deref(),
     );
 
     let run_id = uuid::Uuid::now_v7();
     let run_dir = runs_dir.join(run_id.to_string());
 
-    let quiet = has_flag(&args, "-q") || has_flag(&args, "--quiet");
-    let mut sinks: Vec<Box<dyn Sink>> = vec![Box::new(ConsoleSink { quiet })];
+    let mut sinks: Vec<Box<dyn Sink>> = vec![Box::new(ConsoleSink { quiet: cli.quiet })];
     match file_sink::FileSink::create(run_dir.clone()) {
         Ok(file) => sinks.push(Box::new(file)),
         // A Run that cannot be logged still runs; only durability is lost.
@@ -256,7 +280,7 @@ fn env_var(name: &str) -> Option<String> {
 // in the format-agnostic Kernel.
 #[cfg(test)]
 mod tests {
-    use super::{dim_prefixed, has_flag, message_flag, resolve_initial_message, workflow_path};
+    use super::{dim_prefixed, resolve_initial_message, Cli};
     use kernel::{GateKey, GateTarget, Workflow};
 
     fn args(items: &[&str]) -> Vec<String> {
@@ -264,28 +288,39 @@ mod tests {
     }
 
     #[test]
-    fn workflow_path_skips_leading_flags_and_their_values() {
-        // A boolean flag and a value-taking flag both precede the positional path.
-        let argv = args(&["-q", "--log-dir", "/tmp/runs", "wf.yaml"]);
-        assert_eq!(workflow_path(&argv), Some("wf.yaml"));
+    fn parse_takes_the_first_positional_as_the_path() {
+        let cli = Cli::parse(&args(&["wf.yaml"])).unwrap();
+        assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
     }
 
     #[test]
-    fn workflow_path_is_first_positional() {
-        let argv = args(&["wf.yaml", "--message", "hi"]);
-        assert_eq!(workflow_path(&argv), Some("wf.yaml"));
+    fn parse_without_a_positional_is_a_usage_error() {
+        assert_eq!(Cli::parse(&args(&["-q", "--keep", "5"])), Err(super::UsageError));
     }
 
     #[test]
-    fn workflow_path_absent_yields_none() {
-        let argv = args(&["-q", "--keep", "5"]);
-        assert_eq!(workflow_path(&argv), None);
+    fn parse_captures_flags_after_the_positional() {
+        let cli = Cli::parse(&args(&["wf.yaml", "--message", "hello"])).unwrap();
+        assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
+        assert_eq!(cli.message.as_deref(), Some("hello"));
     }
 
     #[test]
-    fn has_flag_detects_presence() {
-        assert!(has_flag(&args(&["wf.yaml", "-q"]), "-q"));
-        assert!(!has_flag(&args(&["wf.yaml"]), "-q"));
+    fn parse_treats_a_dangling_message_as_absent() {
+        // A trailing `--message` with no value falls back to stdin or the empty
+        // default rather than erroring.
+        let cli = Cli::parse(&args(&["wf.yaml", "--message"])).unwrap();
+        assert_eq!(cli.message, None);
+    }
+
+    #[test]
+    fn parse_captures_flags_before_the_positional() {
+        let cli =
+            Cli::parse(&args(&["-q", "--log-dir", "/tmp/runs", "--keep", "5", "wf.yaml"])).unwrap();
+        assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
+        assert!(cli.quiet);
+        assert_eq!(cli.log_dir.as_deref(), Some("/tmp/runs"));
+        assert_eq!(cli.keep.as_deref(), Some("5"));
     }
 
     #[test]
@@ -293,24 +328,6 @@ mod tests {
         let rendered = dim_prefixed("build", b"first\nsecond\n");
         assert!(rendered.contains("build ▏ first"));
         assert!(rendered.contains("build ▏ second"));
-    }
-
-    #[test]
-    fn message_flag_reads_the_following_value() {
-        let got = message_flag(&args(&["wf.yaml", "--message", "hello"]));
-        assert_eq!(got.as_deref(), Some("hello"));
-    }
-
-    #[test]
-    fn message_flag_absent_yields_none() {
-        assert_eq!(message_flag(&args(&["wf.yaml"])), None);
-    }
-
-    #[test]
-    fn dangling_message_flag_yields_none() {
-        // A trailing `--message` with no value is treated as absent, falling back
-        // to stdin or the empty default rather than erroring.
-        assert_eq!(message_flag(&args(&["wf.yaml", "--message"])), None);
     }
 
     #[test]
