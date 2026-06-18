@@ -67,21 +67,38 @@ workflows:
 
     steps:
       code:
-        # Reads TASK.md (and the findings file on loop-back), edits files, and
-        # runs its own build + test loop until green. Leaves changes unstaged.
-        # Re-emits the TASK.md path as its out-Message.
+        # Purely the coding agent: reads TASK.md (and the deterministic Steps'
+        # feedback files on loop-back), edits files, and leaves changes unstaged.
+        # The build/test gate is the separate `build-test` Step, so `code` exits 0
+        # once the agent finishes and non-zero only if the agent itself failed.
+        # The single re-entry point of the loop: both a red build and a Blocking
+        # review route back here, sharing this Budget.
         command: "$WORKFLOW_DIR/coder/code.sh"
         budget: 3
         gates:
           - key: 0
-            target: { step: review }
-            when: code builds and tests pass — hand off for review
+            target: { step: build-test }
+            when: the coding agent finished — verify the build
           - key: "*"
             target: { exit: 90 }
-            when: the coding agent could not produce a green build — escalate
+            when: the coding agent itself failed to run — escalate
           - key: EXHAUSTED
             target: { exit: 90 }
-            when: code and review did not converge within the Budget — escalate
+            when: code did not converge within the Budget — escalate
+
+      build-test:
+        # Deterministic, LLM-free checkpoint: build the project and run all tests.
+        # Green hands off to review; red loops back to code with the failure in
+        # BUILD_FAILURE.md. The loop is bounded by code's Budget (its re-entry),
+        # so this Step needs no Exhaustion handling of its own.
+        command: "$WORKFLOW_DIR/coder/build-test.sh"
+        gates:
+          - key: 0
+            target: { step: review }
+            when: the build is green and tests pass — hand off for review
+          - key: "*"
+            target: { step: code }
+            when: the build or tests failed — send back to fix
 
       review:
         # Wraps the /code-review skill: writes findings to the shared findings

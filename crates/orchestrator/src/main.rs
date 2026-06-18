@@ -512,14 +512,18 @@ workflows:
         assert!(exits_with(target(coder, "develop", GateKey::Default), 90));
         assert!(exits_with(target(coder, "commit", GateKey::Code(0)), 0));
 
-        // The sub-Workflow is the code <-> review loop, bounded by code's Budget.
-        // Review approval exits 0 (surfacing to the parent), so it never names a
-        // parent Step; a Blocking verdict loops back to code.
+        // The sub-Workflow is the code -> build-test -> review loop, bounded by
+        // code's Budget — its single re-entry point. `code` hands off to the
+        // deterministic build-test gate; a red build loops back to code, a green
+        // build goes to review. Review approval exits 0 (surfacing to the parent);
+        // a Blocking verdict loops back to code.
         let develop = &reg.workflows["develop"];
         assert_eq!(develop.entry, "code");
         assert_eq!(develop.steps["code"].budget, Some(3));
-        assert!(routes_to_step(target(develop, "code", GateKey::Code(0)), "review"));
+        assert!(routes_to_step(target(develop, "code", GateKey::Code(0)), "build-test"));
         assert!(exits_with(target(develop, "code", GateKey::Exhausted), 90));
+        assert!(routes_to_step(target(develop, "build-test", GateKey::Code(0)), "review"));
+        assert!(routes_to_step(target(develop, "build-test", GateKey::Default), "code"));
         assert!(exits_with(target(develop, "review", GateKey::Code(0)), 0));
         assert!(routes_to_step(target(develop, "review", GateKey::Code(1)), "code"));
     }

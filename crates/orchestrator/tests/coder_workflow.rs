@@ -87,8 +87,27 @@ fn persistent_blocking_exhausts_the_loop_and_escalates() {
 }
 
 #[test]
-fn code_that_cannot_build_escalates_with_exit_90() {
-    // A non-zero code Step (a build that never goes green) takes its catch-all
-    // Gate straight to escalation, never reaching review or commit.
-    assert_eq!(run_coder(&[("CODER_STUB_CODE", "1")]), 90);
+fn persistent_build_failure_exhausts_the_loop_and_escalates() {
+    // The deterministic build-test Step never goes green, so it loops back to code
+    // until code's Budget is spent and the EXHAUSTED Gate escalates with EXIT 90,
+    // never reaching review or commit.
+    assert_eq!(run_coder(&[("CODER_STUB_BUILD", "fail")]), 90);
+}
+
+#[test]
+fn transient_build_failure_is_retried_then_succeeds() {
+    // build-test fails on its first activation then passes, so code is re-entered
+    // once to fix the build and the Run still reaches commit and exits 0 — the
+    // build result is a feedback loop, not an automatic escalation. The marker
+    // file that makes the stub "fail once" lives in a temp dir cleaned on Drop.
+    let marker = TempDir::new("build-marker");
+    let marker_path = marker.0.join("failed-once");
+    assert_eq!(
+        run_coder(&[
+            ("CODER_STUB_BUILD", "fail-once"),
+            ("CODER_STUB_BUILD_MARKER", marker_path.to_str().unwrap()),
+            ("CODER_STUB_REVIEW", "clean"),
+        ]),
+        0
+    );
 }
