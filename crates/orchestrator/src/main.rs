@@ -14,21 +14,21 @@ use kernel::{
 
 mod config;
 mod file_sink;
+mod loader;
 mod retention;
 mod tee;
 
-/// A `WorkflowSource` that parses a Workflow registry from a multi-Workflow YAML
-/// file (`root:` + `workflows:`). Cross-file references are a future, additive
-/// source (ADR-0008); this one resolves names within the single file.
+/// A `WorkflowSource` that parses a Workflow registry from a root YAML file
+/// (`root:` + `workflows:`), transitively loading any files its Composite Steps
+/// reference by `{ path: … }` and assembling them into one registry (ADR-0008).
+/// A single-file Workflow is just the degenerate case with no path references.
 struct YamlSource {
     path: PathBuf,
 }
 
 impl WorkflowSource for YamlSource {
     fn load(&self) -> Result<Registry, Box<dyn std::error::Error>> {
-        let text = std::fs::read_to_string(&self.path)?;
-        let registry: Registry = serde_yaml::from_str(&text)?;
-        Ok(registry)
+        loader::load(&self.path)
     }
 }
 
