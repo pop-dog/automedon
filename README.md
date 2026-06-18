@@ -48,8 +48,10 @@ vocabulary lives in [`CONTEXT.md`](CONTEXT.md) and the architectural decisions i
   Run with a clear diagnostic rather than failing silently.
 - **Observability as an Event stream.** The run loop emits Events to a Sink (a
   console trace today), keeping the engine decoupled from output.
-- **Flagship agentic coder.** `examples/coder.yaml` is a runnable `code → review
-  → commit` loop of bespoke `claude -p` LLM Steps that writes code for this repo.
+- **Flagship agentic coder.** `examples/coder.yaml` is a runnable `develop →
+  commit` Composite Workflow whose `develop` child loops `code → build-test →
+  review` — bespoke `claude -p` LLM Steps around a deterministic build/test gate —
+  to write code for this repo.
 
 ## Installation / Quick Start
 
@@ -79,9 +81,11 @@ cargo run -p orchestrator -- <workflow.yaml> --message "<text>"
 ```
 
 The flagship example, [`examples/coder.yaml`](examples/coder.yaml), is an
-agentic coder: a flat `code → review → commit` Workflow whose three Steps are
-bespoke `claude -p` LLM agents. The entry Message is the path to a `TASK.md`
-file; the `code ⇄ review` loop is Budget-bounded, and on non-convergence the
+agentic coder: a Composite `develop → commit` Workflow whose `develop`
+sub-Workflow loops `code → build-test → review`. `code` and `review` are bespoke
+`claude -p` LLM agents; `build-test` is a deterministic build/test gate. The
+entry Message is the path to a `TASK.md` file; a red build or a Blocking review
+loops back to `code` (bounded by its Budget), and on non-convergence the
 `EXHAUSTED` Gate escalates with `EXIT 90`, leaving the unstaged changes and
 findings for a human. Run it from the repo root:
 
