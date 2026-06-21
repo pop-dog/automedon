@@ -86,8 +86,9 @@ sub-Workflow loops `code → build-test → review`. `code` and `review` are bes
 `claude -p` LLM agents; `build-test` is a deterministic build/test gate. The
 entry Message is the path to a `TASK.md` file; a red build or a Blocking review
 loops back to `code` (bounded by its Budget), and on non-convergence the
-`EXHAUSTED` Gate escalates with `EXIT 90`, leaving the unstaged changes and
-findings for a human. Run it from the repo root:
+`EXHAUSTED` Gate escalates with `EXIT 90`, leaving the unstaged changes for a
+human and the review findings in the Run's scratch directory (`$RUN_DIR`, printed
+on a failed Run — see "Step environment"). Run it from the repo root:
 
 ```sh
 cargo run -p orchestrator -- examples/coder.yaml --message ./TASK.md
@@ -103,6 +104,25 @@ toolset is too wide to allowlist; it uses `--dangerously-skip-permissions` and
 relies on running against a throwaway branch a human reviews before pushing. The
 Steps expect `claude` (and `cargo`, for the build check) on `PATH`.
 
+### Step environment
+
+Before running a Step, the orchestrator injects an ambient, Run-constant **Step
+environment** — read-only context every Step inherits, distinct from the Message
+it is piped:
+
+- `$WORKFLOW_DIR` — the directory of the Workflow file, so a Step can name its
+  scripts (`command: "$WORKFLOW_DIR/build.sh"`) independently of the working
+  directory (left as the target repository the Step operates on).
+- `$RUN_DIR` — an ephemeral, per-Run scratch directory under the OS temp dir
+  (`<temp>/agent-orchestrator/runs/<run-id>/`), for bulk bookkeeping a Step must
+  keep out of that repository. It is created before the first Step runs and reaped
+  by the OS (no retention), shares its `<run-id>` with the durable log dir, is
+  recorded in the log's `meta.json`, and is printed to stderr when a Run fails.
+  The coder example writes its review findings and build output here.
+
+The Step environment is the Executor's concern, never the Kernel's
+([ADR-0010](docs/adr/0010-step-environment-and-ephemeral-run-directory.md)).
+
 ### Run logs
 
 A file Sink persists every Run to its own directory under
@@ -115,6 +135,8 @@ holds:
 - `<step>.<activation>.<stream>` — the raw stdout/stderr a Step produced, one
   sidecar per stream per activation, referenced from `events.jsonl`. To see *why*
   a Step failed, read its `.stderr` sidecar.
+- `meta.json` — orchestrator-owned Run metadata (currently the Step environment,
+  including `$RUN_DIR`), kept out of the Kernel's `events.jsonl` (ADR-0003/0010).
 
 This separation of a lean control-plane log from bulk output is
 [ADR-0009](docs/adr/0009-step-output-on-a-dedicated-sink-channel.md); the Kernel
