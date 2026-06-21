@@ -10,6 +10,12 @@
 # catch a failure — but the deterministic gate is what the kernel routes on.
 set -u
 
+# Orchestration scratch lives in the ephemeral Run Directory the engine provides,
+# never in the Repository this Step operates on. Fail loud if it is missing: a cwd
+# fallback would pollute the deliverable and a per-script mktemp would break the
+# cross-Step handoff (review writes the findings that the next code pass reads).
+: "${RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
+
 task_path="$(cat)"
 
 # Stub mode keeps the Step inert (no agent, no edits) so the Workflow's routing
@@ -21,13 +27,13 @@ fi
 
 # On a loop-back the agent is re-entered to fix what the deterministic Steps
 # caught: a review's Blocking findings and/or a failing build/test run, each left
-# in its own file in the working directory.
+# in its own file in the ephemeral Run Directory.
 revise=""
-if [ -f FINDINGS.md ]; then
-    revise="${revise}A previous review left Blocking findings in FINDINGS.md; address them. "
+if [ -f "$RUN_DIR/FINDINGS.md" ]; then
+    revise="${revise}A previous review left Blocking findings in $RUN_DIR/FINDINGS.md; address them. "
 fi
-if [ -f BUILD_FAILURE.md ]; then
-    revise="${revise}A previous build/test run failed; its output is in BUILD_FAILURE.md; fix the cause. "
+if [ -f "$RUN_DIR/BUILD_FAILURE.md" ]; then
+    revise="${revise}A previous build/test run failed; its output is in $RUN_DIR/BUILD_FAILURE.md; fix the cause. "
 fi
 
 prompt="Use the /tdd skill to implement the task described in the file at

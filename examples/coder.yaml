@@ -1,17 +1,20 @@
 # The agentic coder: a Composite `develop -> commit` Workflow whose leaf Steps
 # are bespoke LLM agents (`claude -p`). The entry Message is the path to a
 # TASK.md file; each Step re-emits that path on stdout so it propagates to its
-# successor. Only the small path rides the Message channel — the bulk (the task
-# text, the edits, the review findings) lives in the working directory.
+# successor. Only the small path rides the Message channel — the edits live in the
+# working directory; orchestration scratch (the review findings, the build/test
+# failure) lives in the ephemeral Run Directory ($RUN_DIR).
 #
 #   Run (cwd = the repo to work on):
 #     orchestrator /path/to/examples/coder.yaml --message ./TASK.md
 #
 # Each Step names its script via $WORKFLOW_DIR — the directory of this file, set
-# by the orchestrator — so the scripts are found no matter the cwd. The Steps
-# read TASK.md and write FINDINGS.md into the cwd (the repo being worked on), so
-# the cwd is left as that repo. They also expect `claude`, and (for the build
-# check) `cargo`, on PATH.
+# by the orchestrator — so the scripts are found no matter the cwd. The Steps read
+# TASK.md from the cwd (the repo being worked on) and edit it there, but write
+# orchestration scratch (FINDINGS.md, BUILD_FAILURE.md) into $RUN_DIR — the
+# ephemeral per-Run directory the engine provides — so the repo stays a pure
+# deliverable. They also expect `claude`, and (for the build check) `cargo`, on
+# PATH.
 #
 # Structure: the top-level `coder` Workflow is `develop -> commit`, where
 # `develop` is a Composite Step running the `develop` sub-Workflow — the
@@ -89,7 +92,7 @@ workflows:
       build-test:
         # Deterministic, LLM-free checkpoint: build the project and run all tests.
         # Green hands off to review; red loops back to code with the failure in
-        # BUILD_FAILURE.md. The loop is bounded by code's Budget (its re-entry),
+        # $RUN_DIR/BUILD_FAILURE.md. The loop is bounded by code's Budget (its re-entry),
         # so this Step needs no Exhaustion handling of its own.
         command: "$WORKFLOW_DIR/coder/build-test.sh"
         gates:
