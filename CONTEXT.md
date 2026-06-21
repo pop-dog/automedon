@@ -96,3 +96,21 @@ _Avoid_: Log line, record, Message (a Message is data passed between Steps, not 
 **Sink**:
 A Module that consumes the Kernel's Event stream — e.g. a persistence Sink (the only thing that makes a Run durable), a console trace, or a live monitor. The Kernel publishes Events to zero or more Sinks through a narrow interface (Observer pattern) and never persists anything itself: durability is a Sink's choice, not a Kernel property.
 _Avoid_: Listener, handler, logger, observer (acceptable informally).
+
+## Workspace
+
+**Workspace**:
+The filesystem context a Run operates in — the umbrella over the [[Repository]] and the [[Run Directory]]. It is where bulk artifacts live (the Steps' edits, the task text, review findings), referenced by the small values that ride the Message. The Workspace is *not* a Kernel concept: the Kernel is data- and IO-agnostic (ADR-0003), so the Workspace is a convention the driver and Steps share, not something the engine knows about.
+_Avoid_: Sandbox, scratch (names only one region), Cargo workspace (an unrelated build concept).
+
+**Repository**:
+The target working tree a Run operates on — the repo whose source the Steps read, edit, build, and commit, and the Run's working directory. Its tracked contents are the deliverable, so orchestration bookkeeping must never land here; that belongs in the [[Run Directory]]. Distinct from where the Workflow's own scripts live (the [[Step environment]]'s `$WORKFLOW_DIR`): a Workflow and the Repository it operates on need not be the same directory.
+_Avoid_: Working directory, target, project, codebase.
+
+**Run Directory**:
+The engine-provided, per-Run scratch directory — the second region of the [[Workspace]] and the home of a Run's bulk bookkeeping (review findings, build logs), kept out of the [[Repository]] so it never pollutes the deliverable and the Steps need not lean on the target repo's `.gitignore`. *Ephemeral*: it lives under the OS temp directory and is reaped by the OS (e.g. on restart); the engine provides it but promises no cleanup, and nothing retains it. Distinct from the **durable run log** (the persistence [[Sink]]'s Events plus Step-output sidecars, under XDG state and pruned by retention) — that log is observability written *about* a Run, not where Steps operate, so it is not part of the Workspace. The engine hands each Step the Run Directory through the [[Step environment]] as `$RUN_DIR`.
+_Avoid_: Scratch dir (informal), temp dir, log dir (that is the separate durable run log).
+
+**Step environment**:
+The ambient, read-only context the [[Step Executor]] establishes for every Step before running it. Constant across the whole Run and identical for every Step, so the engine *broadcasts* it rather than passing it Step-to-Step like a [[Message]] — a fourth channel alongside control (the exit code), data (the Message), and output (Step output to the [[Sink]]). Its members are `$WORKFLOW_DIR` (where the Workflow's scripts live) and `$RUN_DIR` (the [[Run Directory]]). The subprocess Executor realises it as environment variables inherited by each `sh -c` child; the [[Kernel]] never sees it (ADR-0003) — it is the Executor adapter's concern, like Run identity is the orchestrator's (ADR-0009).
+_Avoid_: Env, globals, config, ambient state.
