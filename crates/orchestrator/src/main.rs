@@ -218,19 +218,18 @@ fn main() {
     });
     let path = cli.path;
 
-    // Expose the workflow definition's directory as $WORKFLOW_DIR so a Step can
-    // locate the scripts it names (e.g. `command: "$WORKFLOW_DIR/fetch.sh"`)
-    // independently of the working directory. This decouples *where the scripts
-    // live* (the workflow repo) from *where the work happens*: the cwd is left as
-    // the target project root — the repo a Step reads, edits, and commits — so a
-    // workflow and the repo it operates on need not be the same directory. The
-    // child Steps inherit this variable through the kernel's plain `sh -c` spawn.
+    // The workflow definition's directory becomes $WORKFLOW_DIR (a Step
+    // environment member, below) so a Step can locate the scripts it names (e.g.
+    // `command: "$WORKFLOW_DIR/fetch.sh"`) independently of the working directory.
+    // This decouples *where the scripts live* (the workflow repo) from *where the
+    // work happens*: the cwd is left as the target project root — the repo a Step
+    // reads, edits, and commits — so a workflow and the repo it operates on need
+    // not be the same directory.
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let workflow_dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    std::env::set_var("WORKFLOW_DIR", &workflow_dir);
 
     let source = YamlSource { path };
     let registry = source.load().unwrap_or_else(|e| {
@@ -264,13 +263,35 @@ fn main() {
     );
 
     let run_id = uuid::Uuid::now_v7();
-    let run_dir = runs_dir.join(run_id.to_string());
+    let log_dir = runs_dir.join(run_id.to_string());
+
+    // The ephemeral Run Directory ($RUN_DIR): per-Run scratch the engine provides
+    // under the OS temp root, sharing this Run's id with the durable log dir but
+    // with an independent (OS-reaped) lifecycle (ADR-0010). Created best-effort
+    // before the first Step runs; a Run whose scratch cannot be made still runs.
+    let run_dir = config::run_scratch_dir(&std::env::temp_dir(), &run_id.to_string());
+    if let Err(e) = std::fs::create_dir_all(&run_dir) {
+        eprintln!("warning: cannot create run directory at {}: {e}", run_dir.display());
+    }
+
+    // The Step environment: the ambient, Run-constant context every Step receives
+    // (ADR-0010). The Executor injects it per-spawn, retiring the previous global
+    // `set_var("WORKFLOW_DIR")`. Logging whatever it holds covers future members.
+    let environment: Vec<(String, PathBuf)> = vec![
+        ("WORKFLOW_DIR".to_string(), workflow_dir),
+        ("RUN_DIR".to_string(), run_dir.clone()),
+    ];
 
     let mut sinks: Vec<Box<dyn Sink>> = vec![Box::new(ConsoleSink { quiet: cli.quiet })];
-    match file_sink::FileSink::create(run_dir.clone()) {
-        Ok(file) => sinks.push(Box::new(file)),
+    match file_sink::FileSink::create(log_dir.clone()) {
+        Ok(file) => {
+            // Record the populated Step environment once at startup, so the
+            // ephemeral Run Directory is discoverable from the durable log.
+            file.record_environment(&environment);
+            sinks.push(Box::new(file));
+        }
         // A Run that cannot be logged still runs; only durability is lost.
-        Err(e) => eprintln!("warning: cannot open run log at {}: {e}", run_dir.display()),
+        Err(e) => eprintln!("warning: cannot open run log at {}: {e}", log_dir.display()),
     }
 
     // Prune once this Run's directory exists, so the newest (this) Run counts
@@ -278,7 +299,7 @@ fn main() {
     let _ = retention::prune(&runs_dir, keep);
 
     let mut sink = tee::Tee::new(sinks);
-    let mut executor = SubprocessExecutor::new();
+    let mut executor = SubprocessExecutor::with_env(environment);
 
     let max_depth = config::resolve_max_depth(
         cli.max_depth.as_deref(),
@@ -286,7 +307,16 @@ fn main() {
     );
     let run_config = RunConfig::default().with_max_depth(max_depth);
 
-    match kernel::run(&registry, &initial_message, &run_config, &mut executor, &mut sink) {
+    let outcome = kernel::run(&registry, &initial_message, &run_config, &mut executor, &mut sink);
+
+    // On a failed Run — a non-zero exit or a Fault — point the operator at the
+    // ephemeral Run Directory, the engine's live counterpart to the startup
+    // metadata record, so a Run's scratch is findable without any Step echoing it.
+    let failed = !matches!(outcome, Ok(0));
+    if failed {
+        eprintln!("run directory: {}", run_dir.display());
+    }
+    match outcome {
         Ok(code) => std::process::exit(code),
         // A Fault is not an exit code; surface it on a distinct status (sysexits EX_SOFTWARE).
         Err(_) => std::process::exit(70),

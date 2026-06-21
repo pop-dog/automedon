@@ -5,6 +5,7 @@
 //! additive adapter rather than a Kernel change.
 
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -34,13 +35,27 @@ pub trait StepExecutor {
 }
 
 /// The production [`StepExecutor`]: each Step is an `sh -c` subprocess with the
-/// working directory inherited. Stateless.
+/// working directory inherited. Carries the Step environment — the ambient,
+/// Run-constant context (`$WORKFLOW_DIR`, `$RUN_DIR`) the engine provides — and
+/// layers it onto every spawn's inherited env (ADR-0010). Constant for the Run.
 #[derive(Default)]
-pub struct SubprocessExecutor;
+pub struct SubprocessExecutor {
+    /// Name/path pairs injected into each child's environment per spawn,
+    /// overlaying the inherited env. Empty means "inherit only".
+    env: Vec<(String, PathBuf)>,
+}
 
 impl SubprocessExecutor {
+    /// An Executor that injects no Step environment of its own; children inherit
+    /// the driver's env unchanged.
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// An Executor carrying the Step environment to inject into every spawned
+    /// Step, layered on the inherited env (ADR-0010).
+    pub fn with_env(env: Vec<(String, PathBuf)>) -> Self {
+        Self { env }
     }
 }
 
@@ -61,6 +76,9 @@ impl StepExecutor for SubprocessExecutor {
         let mut child = Command::new("sh")
             .arg("-c")
             .arg(command)
+            // Layer the Step environment over the inherited env; `envs` adds to
+            // (does not clear) what the child would inherit.
+            .envs(self.env.iter().map(|(k, v)| (k, v.as_os_str())))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -130,4 +148,38 @@ fn pipe_reader(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::SubprocessExecutor;
+    use crate::{Event, Sink, StepExecutor};
+
+    /// A Sink that ignores everything; these tests assert on the out-Message,
+    /// not the output channel.
+    struct NullSink;
+    impl Sink for NullSink {
+        fn emit(&mut self, _event: &Event) {}
+    }
+
+    #[test]
+    fn with_env_injects_the_step_environment_into_the_child() {
+        // Both Step environment members ride into the child as real environment
+        // variables, so a command can read what the engine provided.
+        let mut exec = SubprocessExecutor::with_env(vec![
+            ("WORKFLOW_DIR".to_string(), PathBuf::from("/wf")),
+            ("RUN_DIR".to_string(), PathBuf::from("/tmp/agent-orchestrator/runs/abc")),
+        ]);
+        let (code, out) = exec.execute(
+            "printf '%s|%s' \"$WORKFLOW_DIR\" \"$RUN_DIR\"",
+            &[],
+            "s",
+            0,
+            &mut NullSink,
+        );
+        assert_eq!(code, 0);
+        assert_eq!(out, b"/wf|/tmp/agent-orchestrator/runs/abc");
+    }
 }

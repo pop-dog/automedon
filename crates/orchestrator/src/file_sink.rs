@@ -15,6 +15,11 @@ use serde::Serialize;
 /// The control-plane log filename inside a Run directory.
 const EVENTS_FILE: &str = "events.jsonl";
 
+/// Orchestrator-owned run-metadata filename inside a Run directory. Holds facts
+/// the orchestrator (not the Kernel) knows about a Run — currently the Step
+/// environment — kept out of the Kernel's `events.jsonl` (ADR-0003/0010).
+const META_FILE: &str = "meta.json";
+
 /// Writes a single Run's records under `dir`.
 pub struct FileSink {
     dir: PathBuf,
@@ -62,6 +67,22 @@ impl FileSink {
             .append(true)
             .open(dir.join(EVENTS_FILE))?;
         Ok(FileSink { dir, events, seq: 0, referenced: HashSet::new() })
+    }
+
+    /// Record the populated Step environment once, as orchestrator-owned run
+    /// metadata in `meta.json` — not a Kernel Event (ADR-0003/0010). Whatever the
+    /// Step environment holds is logged, so future members are covered without
+    /// changing this method. Best-effort: a metadata write failure must not abort
+    /// the Run.
+    pub fn record_environment(&self, environment: &[(String, PathBuf)]) {
+        let environment: serde_json::Map<String, serde_json::Value> = environment
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::from(v.to_string_lossy().into_owned())))
+            .collect();
+        let meta = serde_json::json!({ "environment": environment });
+        if let Ok(text) = serde_json::to_string(&meta) {
+            let _ = std::fs::write(self.dir.join(META_FILE), text);
+        }
     }
 
     /// Take the next `seq` and the current wall-clock `ts`. Bundled because a
@@ -205,6 +226,32 @@ mod tests {
         assert_eq!(files.len(), 2);
         assert!(files.contains(&"build.0.stderr".to_string()));
         assert!(files.contains(&"build.0.stdout".to_string()));
+    }
+
+    #[test]
+    fn step_environment_is_recorded_once_as_run_metadata() {
+        use std::path::PathBuf;
+
+        let tmp = TempDir::new();
+        let run_dir = tmp.0.join("run");
+        {
+            let sink = FileSink::create(run_dir.clone()).unwrap();
+            sink.record_environment(&[
+                ("WORKFLOW_DIR".to_string(), PathBuf::from("/wf")),
+                ("RUN_DIR".to_string(), PathBuf::from("/tmp/runs/abc")),
+            ]);
+        }
+        // The Step environment lands in an orchestrator-owned metadata file, not
+        // in the Kernel's events.jsonl (ADR-0003/0010).
+        assert!(!run_dir.join("events.jsonl").exists() || {
+            let log = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+            !log.contains("RUN_DIR")
+        });
+        let meta: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(run_dir.join("meta.json")).unwrap())
+                .unwrap();
+        assert_eq!(meta["environment"]["WORKFLOW_DIR"], "/wf");
+        assert_eq!(meta["environment"]["RUN_DIR"], "/tmp/runs/abc");
     }
 
     #[test]

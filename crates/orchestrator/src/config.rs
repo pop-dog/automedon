@@ -2,7 +2,7 @@
 //! functions (no env/argv access) so the precedence rules are unit-testable
 //! (ADR-0009, decisions 4 and 7).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use kernel::DEFAULT_MAX_DEPTH;
 
@@ -32,6 +32,15 @@ pub fn runs_dir(
         (None, None) => PathBuf::new(),
     };
     state_root.join(APP_DIR).join("runs")
+}
+
+/// Resolve a Run's ephemeral Run Directory (`$RUN_DIR`):
+/// `<temp_root>/agent-orchestrator/runs/<run-id>/` (ADR-0010). It shares its
+/// `run_id` with the durable log dir but lives under the OS temp root, not state,
+/// so the two correlate yet have independent lifecycles. Pure (the caller passes
+/// `std::env::temp_dir()`) so the layout is unit-testable without env access.
+pub fn run_scratch_dir(temp_root: &Path, run_id: &str) -> PathBuf {
+    temp_root.join(APP_DIR).join("runs").join(run_id)
 }
 
 /// Resolve the retention cap: a `--keep`/env value if it parses, else
@@ -79,6 +88,12 @@ mod tests {
     fn home_default_used_when_no_xdg() {
         let got = runs_dir(None, None, Some("/home/u"));
         assert_eq!(got, PathBuf::from("/home/u/.local/state/agent-orchestrator/runs"));
+    }
+
+    #[test]
+    fn run_scratch_dir_is_under_the_temp_root_keyed_by_run_id() {
+        let got = super::run_scratch_dir(&PathBuf::from("/tmp"), "01234567-run");
+        assert_eq!(got, PathBuf::from("/tmp/agent-orchestrator/runs/01234567-run"));
     }
 
     #[test]
