@@ -40,6 +40,10 @@ collision-free once published.
 - Naming the engine after a charioteer rather than a conductor or "orchestrator"
   reinforces the microkernel framing (ADR-0003): the thing steers; the Steps do
   the work.
+- 2026-06-26 (#19): the rebrand "scoped to the binary/command for now" above has
+  been advanced — the repo, the README/`CONTEXT.md` titles, and the on-disk app
+  dir now carry the `automedon` brand. The `orchestrator`/`kernel` crate names are
+  the deliberate exception that remains, kept as descriptive role names.
 
 ## Considered and rejected
 

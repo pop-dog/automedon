@@ -170,7 +170,7 @@ mod tests {
         // variables, so a command can read what the engine provided.
         let mut exec = SubprocessExecutor::with_env(vec![
             ("WORKFLOW_DIR".to_string(), PathBuf::from("/wf")),
-            ("RUN_DIR".to_string(), PathBuf::from("/tmp/agent-orchestrator/runs/abc")),
+            ("RUN_DIR".to_string(), PathBuf::from("/tmp/automedon/runs/abc")),
         ]);
         let (code, out) = exec.execute(
             "printf '%s|%s' \"$WORKFLOW_DIR\" \"$RUN_DIR\"",
@@ -180,6 +180,6 @@ mod tests {
             &mut NullSink,
         );
         assert_eq!(code, 0);
-        assert_eq!(out, b"/wf|/tmp/agent-orchestrator/runs/abc");
+        assert_eq!(out, b"/wf|/tmp/automedon/runs/abc");
     }
 }

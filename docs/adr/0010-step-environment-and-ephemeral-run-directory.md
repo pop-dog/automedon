@@ -28,7 +28,7 @@ control signal (the exit code) nor the Message.
   side-effect on the driver's own process state rather than a value the engine
   provides.
 - **The Run Directory is ephemeral.** `$RUN_DIR` is
-  `<os-temp>/agent-orchestrator/runs/<run-id>/`, derived by the driver from the
+  `<os-temp>/automedon/runs/<run-id>/`, derived by the driver from the
   same UUIDv7 it already mints for the durable log (so the two correlate). It is
   reaped by the OS (e.g. on restart); the engine creates it but promises no
   cleanup, and nothing retains it. The OS temp root is `std::env::temp_dir()` —
@@ -58,7 +58,7 @@ control signal (the exit code) nor the Message.
 - The driver renames its existing `run_dir` (the durable-log directory handed to
   the file Sink) to `log_dir`, freeing `run_dir` for the new scratch dir — a
   same-name/different-directory trap otherwise.
-- A long-lived host accumulates `<temp>/agent-orchestrator/runs/<id>/` directories
+- A long-lived host accumulates `<temp>/automedon/runs/<id>/` directories
   until reboot; accepted as the cost of "no engine cleanup." If buildup bites, the
   existing `retention::prune` can later be pointed at the temp runs dir for a count
   cap — an additive change.
@@ -66,6 +66,12 @@ control signal (the exit code) nor the Message.
   Repository: the engine's startup record plus its failure pointer make the
   ephemeral Run Directory discoverable, so a non-converged Run's scratch is findable
   without reintroducing repo writes.
+- 2026-06-26 (#19): the app-dir segment was `agent-orchestrator` before the
+  rebrand to `automedon`; pre-rebrand run dirs are orphaned (no migration). The
+  ephemeral temp run dir is left for OS reaping; the durable state logs under the
+  old segment are neither OS-reaped nor capped by `retention::prune` (which now
+  targets the `automedon` dir), so they persist until manually removed — accepted
+  as the cost of skipping migration.
 
 ## Considered and rejected
 

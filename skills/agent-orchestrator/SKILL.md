@@ -3,7 +3,7 @@ name: agent-orchestrator
 description: Run a Workflow on the agent-orchestrator engine — invoke the orchestrator binary with a Workflow template file, then read its trace, exit code, and logs. Use when asked to run, drive, or debug any agent-orchestrator Workflow (a `.yaml` template), or to operate the orchestrator engine in general. For the bundled coder example specifically, use the `autocoder` skill.
 ---
 
-## Agent Orchestrator — run a Workflow
+## Automedon — run a Workflow
 
 Drive the `agent-orchestrator` engine: run a **Workflow template** (a `.yaml`
 file) by invoking the `orchestrator` binary, then read its trace and logs. This
@@ -54,7 +54,7 @@ the trace vocabulary (Step/Gate/Frame lines).
 ### Find the logs
 
 Every Run writes a durable log directory under
-`~/.local/state/agent-orchestrator/runs/<run-id>/` (newest sorts last by
+`~/.local/state/automedon/runs/<run-id>/` (newest sorts last by
 UUIDv7): `events.jsonl` (the control trace) plus per-Step `.stderr`/`.stdout`
 sidecars. To see *why* a Step failed, read its `.stderr` sidecar. A failed Run
 also prints its ephemeral scratch directory (`$RUN_DIR`) to stderr. The full

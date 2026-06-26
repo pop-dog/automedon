@@ -1,7 +1,7 @@
 #!/bin/sh
 # Remote installer for the `automedon` binary.
 #
-#   curl -fsSL https://raw.githubusercontent.com/pop-dog/agent-orchestrator/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/pop-dog/automedon/main/install.sh | bash
 #
 # Downloads a prebuilt release binary for the host platform, verifies it against
 # the release checksums, and installs it onto your PATH. No Rust toolchain and no
@@ -11,7 +11,7 @@
 # Idempotent: safe to re-run; a fresh download replaces the installed binary.
 set -eu
 
-REPO="pop-dog/agent-orchestrator"
+REPO="pop-dog/automedon"
 # Override points for release mirrors and offline testing. The defaults point at
 # the project's GitHub releases.
 : "${AUTOMEDON_BASE_URL:=https://github.com/$REPO/releases/download}"

@@ -1,4 +1,4 @@
-# Agent Orchestrator
+# Automedon
 
 A framework for defining and executing developer workflows as a directed control-flow graph of executable Steps. The graph is LLM-independent, but is designed so that Steps can invoke LLM agents (e.g. `claude -p ...`).
 

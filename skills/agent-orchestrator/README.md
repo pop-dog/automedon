@@ -7,7 +7,7 @@ covers the engine mechanics only — it is Workflow-agnostic.
 > This is the operating subset of the project's root `README.md`, kept here so it
 > ships self-contained with the skill. Keep the two in sync. For architecture,
 > the domain glossary, and design decisions, see the repository:
-> <https://github.com/pop-dog/agent-orchestrator>.
+> <https://github.com/pop-dog/automedon>.
 
 ## Running a Workflow
 
@@ -36,13 +36,13 @@ Step inherits, distinct from the Message:
   scripts (`command: "$WORKFLOW_DIR/build.sh"`) independently of the working
   directory.
 - **`$RUN_DIR`** — an ephemeral, per-Run scratch directory under the OS temp dir
-  (`<temp>/agent-orchestrator/runs/<run-id>/`), for bulk bookkeeping a Step must
+  (`<temp>/automedon/runs/<run-id>/`), for bulk bookkeeping a Step must
   keep out of the working repository. It is created before the first Step runs and
   reaped by the OS (no retention), shares its `<run-id>` with the durable log dir,
   is recorded in the log's `meta.json`, and is **printed to stderr when a Run
   fails**.
 
-Design: [ADR-0010](https://github.com/pop-dog/agent-orchestrator/blob/main/docs/adr/0010-step-environment-and-ephemeral-run-directory.md).
+Design: [ADR-0010](https://github.com/pop-dog/automedon/blob/main/docs/adr/0010-step-environment-and-ephemeral-run-directory.md).
 
 ## Reading the trace
 
@@ -77,7 +77,7 @@ process status.
 ## Run logs
 
 A file Sink persists every Run to its own directory under
-`$XDG_STATE_HOME/agent-orchestrator/runs/<run-id>/` (falling back to
+`$XDG_STATE_HOME/automedon/runs/<run-id>/` (falling back to
 `~/.local/state/...`), where `<run-id>` is a time-sortable UUIDv7 (newest sorts
 last). Each directory holds:
 
