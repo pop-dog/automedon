@@ -1,6 +1,6 @@
 [package]
 name = "orchestrator"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 publish = false
 
@@ -14,5 +14,5 @@ serde_yaml = "0.9"
 uuid = { version = "1.23.3", features = ["v7"] }
 
 [[bin]]
-name = "orchestrator"
+name = "automedon"
 path = "src/main.rs"

@@ -33,7 +33,7 @@ fn run_workflow(yaml: &str, extra_args: &[&str]) -> i32 {
     let wf_path = work.0.join("wf.yaml");
     std::fs::write(&wf_path, yaml).unwrap();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_orchestrator"))
+    let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")

@@ -17,9 +17,10 @@ file.
 
 ### Prerequisites
 
-- `orchestrator` on `PATH` — build and install it with the repo's `./install.sh`
+- `automedon` on `PATH`. End users install a prebuilt release with the repo's
+  `install.sh`; contributors build from source with `scripts/dev-install.sh`
   (`cargo install --path crates/orchestrator`). The binary is a build snapshot;
-  re-run `./install.sh` after changing the engine.
+  re-run `scripts/dev-install.sh` after changing the engine.
 - Whatever a Workflow's Steps need on `PATH` (the coder example needs `claude`
   and `cargo`).
 
@@ -29,9 +30,9 @@ Run from the directory the Workflow should operate on — its working directory,
 e.g. the repo a Step reads, edits, and commits:
 
 ```sh
-orchestrator <workflow.yaml> --message "<text>"
+automedon <workflow.yaml> --message "<text>"
 # or pipe the Message on stdin:
-echo '<text>' | orchestrator <workflow.yaml>
+echo '<text>' | automedon <workflow.yaml>
 ```
 
 `--message` is the entry Step's input (the Workflow's argument); the flag wins
