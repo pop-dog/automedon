@@ -61,6 +61,17 @@ _Avoid_: Engine, runtime, core, interpreter (acceptable informally), framework (
 The seam between *deciding which Gate* (routing, in the run loop) and *actually running a Step's command*. The Kernel's routing core calls a `StepExecutor` to run one Step and report back its `(exit code, out-Message)`, streaming output to the Sink as it arrives; the production adapter runs the Step as a subprocess (`sh -c`). Isolating execution behind this trait lets the routing core (Budget cascade, Gate precedence, Exhaustion, Faults) be tested with canned outcomes — no shell, no I/O — and keeps the whole Step ABI ("a process that exits with an integer", ADR-0003) as one swappable adapter, leaving a future executor an additive change rather than a Kernel change.
 _Avoid_: Runner, driver, invoker, spawner.
 
+**Orchestrator**:
+The composition root that assembles and runs a [[Run]] from the [[Kernel]] and
+its [[Module]]s — the home of everything the Kernel is deliberately ignorant of.
+It parses the Workflow file, constructs the [[Sink]]s, mints the Run's UUIDv7
+identity (ADR-0009), establishes the [[Step environment]] (ADR-0010), then runs
+the Kernel's routing loop. Realised as the `orchestrator` crate, which builds the
+`automedon` binary: the crate keeps the descriptive role name while the product
+and binary carry the brand (ADR-0011). Distinct from the [[Kernel]] (which only
+routes) and a [[Module]] (an opt-in capability the orchestrator wires in).
+_Avoid_: Engine (that is the Kernel), driver, runner, main, app, host.
+
 **Module**:
 An opt-in layer built on top of the Kernel, never part of it — e.g. an LLM adapter (Gates→prompt generator, output→integer parser). A Module may read kernel-opaque annotations (like a Gate's `when`) but the Kernel never depends on a Module.
 _Avoid_: Plugin, extension, package.
