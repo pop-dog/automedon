@@ -41,7 +41,7 @@ fn run_coder_logging_to(log_dir: &Path, extra_env: &[(&str, &str)]) -> i32 {
     // We run from the repo root because that is the workspace the Steps read
     // (./TASK.md) and write (FINDINGS.md).
     let repo_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_orchestrator"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_automedon"));
     cmd.current_dir(repo_root)
         .env("CODER_STUB", "1")
         .arg("--log-dir")

@@ -54,7 +54,7 @@ workflows:
     let wf_path = work.0.join("wf.yaml");
     std::fs::write(&wf_path, wf).unwrap();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_orchestrator"))
+    let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")
@@ -105,7 +105,7 @@ workflows:
     let wf_path = work.0.join("wf.yaml");
     std::fs::write(&wf_path, wf).unwrap();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_orchestrator"))
+    let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")
@@ -156,7 +156,7 @@ workflows:
     let wf_path = work.0.join("wf.yaml");
     std::fs::write(&wf_path, wf).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_orchestrator"))
+    let output = Command::new(env!("CARGO_BIN_EXE_automedon"))
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")
@@ -209,7 +209,7 @@ workflows:
     // exists) must hold the directory to the newest `--keep` Runs.
     let keep = 2;
     for _ in 0..5 {
-        let status = Command::new(env!("CARGO_BIN_EXE_orchestrator"))
+        let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
             .arg("--log-dir")
             .arg(&log_dir.0)
             .arg("--keep")

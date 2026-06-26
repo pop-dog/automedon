@@ -55,13 +55,29 @@ vocabulary lives in [`CONTEXT.md`](CONTEXT.md) and the architectural decisions i
 
 ## Installation / Quick Start
 
-Requires a [Rust toolchain](https://rustup.rs/) (edition 2021) with `cargo`.
+End users can install a prebuilt `automedon` binary onto their `PATH` with one
+command — no Rust toolchain and no repo clone needed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pop-dog/agent-orchestrator/main/install.sh | bash
+```
+
+The installer downloads the release matching your platform, verifies it against
+the published checksums, and installs it to `~/.local/bin` (override with
+`--bin-dir <dir>` or `AUTOMEDON_BIN_DIR`). Pin a version with `--version <v>` or
+the `VERSION` env var.
+
+Contributors working on the engine build from source instead. This requires a
+[Rust toolchain](https://rustup.rs/) (edition 2021) with `cargo`:
 
 ```sh
 git clone https://github.com/pop-dog/agent-orchestrator.git
 cd agent-orchestrator
 cargo build
 ```
+
+`scripts/dev-install.sh` installs the `automedon` binary from source and symlinks
+the bundled Claude skills; re-run it after changing the engine.
 
 Run the totality demo — a Workflow that loops a failing Step 3 times (its
 Budget), then takes the `EXHAUSTED` Gate to `EXIT 42`, proving the engine is

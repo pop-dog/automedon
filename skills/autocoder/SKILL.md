@@ -16,12 +16,13 @@ Every code change comes from the orchestrator's agents.
 
 ### Prerequisites
 
-- `orchestrator` on `PATH`, plus `claude` and `cargo` — the coder's Steps drive a
+- `automedon` on `PATH`, plus `claude` and `cargo` — the coder's Steps drive a
   `claude` agent and run `cargo build && cargo test`.
-- **Re-install after engine changes.** The `orchestrator` binary is a build
+- **Re-install after engine changes.** The `automedon` binary is a build
   snapshot. Because this Workflow can modify the engine itself (the
-  `orchestrator`/`kernel` crates), re-run the repo's `./install.sh` whenever the
-  engine changes, so the binary you run reflects them.
+  `orchestrator`/`kernel` crates), re-run the repo's `scripts/dev-install.sh`
+  whenever the engine changes, so the binary you run reflects them. (The repo's
+  `install.sh` downloads a prebuilt release and would not pick up your changes.)
 
 ### Process
 
@@ -44,7 +45,7 @@ the repo the coder reads, edits, and commits.
    ```
 4. **Run the coder:**
    ```sh
-   orchestrator examples/coder.yaml --message .workflows/<slug>/TASK.md
+   automedon examples/coder.yaml --message .workflows/<slug>/TASK.md
    ```
 5. **Read the outcome** from the trace's final line `◆ RUN ended -> exit <code>`
    (not a shell/`tee` exit code):

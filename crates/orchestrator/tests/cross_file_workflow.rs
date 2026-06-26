@@ -39,7 +39,7 @@ impl Drop for TempDir {
 /// dir, returning its exit code. Extra args (e.g. `--max-depth`) are appended.
 fn run_root(root: &Path, extra_args: &[&str]) -> i32 {
     let log_dir = TempDir::new("log");
-    let status = Command::new(env!("CARGO_BIN_EXE_orchestrator"))
+    let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")
