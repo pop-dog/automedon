@@ -1,4 +1,6 @@
-# Agent Orchestrator
+# Automedon
+
+Automedon drives your workflows.
 
 A framework for defining and executing developer workflows as a directed
 control-flow graph of executable Steps — LLM-independent, total, and observable.
@@ -23,7 +25,7 @@ control-flow graph of executable Steps — LLM-independent, total, and observabl
 
 ## Overview
 
-Agent Orchestrator runs developer workflows expressed as a graph of Steps, where
+Automedon runs developer workflows expressed as a graph of Steps, where
 each Step can invoke anything that exits with an integer — a shell script, a
 binary, or an LLM agent. The graph is LLM-independent: control flow is driven by
 exit codes routed through Gates, not by any model's reasoning. Its defining
@@ -59,7 +61,7 @@ End users can install a prebuilt `automedon` binary onto their `PATH` with one
 command — no Rust toolchain and no repo clone needed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/pop-dog/agent-orchestrator/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/pop-dog/automedon/main/install.sh | bash
 ```
 
 The installer downloads the release matching your platform, verifies it against
@@ -71,8 +73,8 @@ Contributors working on the engine build from source instead. This requires a
 [Rust toolchain](https://rustup.rs/) (edition 2021) with `cargo`:
 
 ```sh
-git clone https://github.com/pop-dog/agent-orchestrator.git
-cd agent-orchestrator
+git clone https://github.com/pop-dog/automedon.git
+cd automedon
 cargo build
 ```
 
@@ -130,7 +132,7 @@ it is piped:
   scripts (`command: "$WORKFLOW_DIR/build.sh"`) independently of the working
   directory (left as the target repository the Step operates on).
 - `$RUN_DIR` — an ephemeral, per-Run scratch directory under the OS temp dir
-  (`<temp>/agent-orchestrator/runs/<run-id>/`), for bulk bookkeeping a Step must
+  (`<temp>/automedon/runs/<run-id>/`), for bulk bookkeeping a Step must
   keep out of that repository. It is created before the first Step runs and reaped
   by the OS (no retention), shares its `<run-id>` with the durable log dir, is
   recorded in the log's `meta.json`, and is printed to stderr when a Run fails.
@@ -142,7 +144,7 @@ The Step environment is the Executor's concern, never the Kernel's
 ### Run logs
 
 A file Sink persists every Run to its own directory under
-`$XDG_STATE_HOME/agent-orchestrator/runs/<run-id>/` (falling back to
+`$XDG_STATE_HOME/automedon/runs/<run-id>/` (falling back to
 `~/.local/state/...`), where `<run-id>` is a time-sortable UUIDv7. Each directory
 holds:
 
@@ -192,7 +194,7 @@ For line-coverage instructions and what the engine covers, see
 ## Roadmap
 
 The plan and the current status of each vertical slice are tracked as GitHub
-issues grouped under the [`v0.1` milestone](https://github.com/pop-dog/agent-orchestrator/milestones).
+issues grouped under the [`v0.1` milestone](https://github.com/pop-dog/automedon/milestones).
 
 ## Configuration
 
@@ -206,7 +208,7 @@ Message, Fault, Sink) is defined in [`CONTEXT.md`](CONTEXT.md).
 
 Contributions are welcome. The project follows Conventional Commits for commit
 subjects and targets 60% test coverage; please read [`CONTEXT.md`](CONTEXT.md)
-for the domain vocabulary and the [milestones](https://github.com/pop-dog/agent-orchestrator/milestones)
+for the domain vocabulary and the [milestones](https://github.com/pop-dog/automedon/milestones)
 for where the work is headed before opening a pull request. New work lands as thin, end-to-end
 vertical slices, each covered by tests.
 

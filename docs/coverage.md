@@ -18,5 +18,5 @@ cargo llvm-cov --html --open              # browsable line-by-line report
 The `kernel` crate (the correctness-critical engine) is the coverage target.
 The uncovered remainder is the deliberate `panic!` paths for malformed input
 (a deferred production-hardening item, tracked under the [Cross-cutting work
-milestone](https://github.com/pop-dog/agent-orchestrator/milestones)) and the
+milestone](https://github.com/pop-dog/automedon/milestones)) and the
 console Sink's rendering glue. The project requires 60% test coverage.

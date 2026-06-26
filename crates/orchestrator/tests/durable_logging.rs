@@ -181,7 +181,7 @@ workflows:
 
 /// The expected `$RUN_DIR` for a given run-id, mirroring the engine's resolver.
 fn config_run_scratch_dir(run_id: &str) -> PathBuf {
-    std::env::temp_dir().join("agent-orchestrator").join("runs").join(run_id)
+    std::env::temp_dir().join("automedon").join("runs").join(run_id)
 }
 
 #[test]

@@ -50,6 +50,46 @@ fn skills_invoke_the_renamed_binary() {
 }
 
 #[test]
+fn skills_point_at_the_renamed_run_log_directory() {
+    // The durable Run log lives under `APP_DIR`, renamed to `automedon` in the
+    // rebrand (see crates/orchestrator/src/config.rs). The skills hand agents
+    // this path to read a failed Run's `.stderr` sidecars, so a stale
+    // `agent-orchestrator/runs` segment sends them to a directory the engine no
+    // longer writes. The bare skill name `agent-orchestrator` (without `/runs`)
+    // legitimately survives and is not matched here.
+    for name in ["autocoder", "agent-orchestrator"] {
+        let body = skill(name);
+        assert!(
+            !body.contains("agent-orchestrator/runs"),
+            "{name} still points at the pre-rebrand `agent-orchestrator/runs` log path"
+        );
+    }
+
+    // The engine skill is where the durable-log layout is documented; it must
+    // name the relocated path so agents look in the right place.
+    assert!(
+        skill("agent-orchestrator").contains("automedon/runs"),
+        "agent-orchestrator must document the relocated `automedon/runs` log path"
+    );
+}
+
+#[test]
+fn engine_skill_uses_the_automedon_product_label() {
+    // The rebrand carries the product label `Agent Orchestrator` -> `Automedon`
+    // through the docs, including the engine skill's run-section heading. The
+    // skill *name* (`agent-orchestrator`, the directory) is deliberately kept.
+    let engine = skill("agent-orchestrator");
+    assert!(
+        engine.contains("## Automedon — run a Workflow"),
+        "agent-orchestrator must head its run section with the `Automedon` label"
+    );
+    assert!(
+        !engine.contains("## Agent Orchestrator"),
+        "agent-orchestrator still carries the pre-rebrand `Agent Orchestrator` label"
+    );
+}
+
+#[test]
 fn skills_rebuild_the_engine_with_the_dev_install_script() {
     // `install.sh` now downloads a prebuilt release; rebuilding the engine from
     // source is `scripts/dev-install.sh`. The skills' "re-install after engine

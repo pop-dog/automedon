@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use kernel::DEFAULT_MAX_DEPTH;
 
 /// Application subdirectory under the chosen state root.
-const APP_DIR: &str = "agent-orchestrator";
+const APP_DIR: &str = "automedon";
 
 /// Default number of Runs to retain when no override is given.
 pub const DEFAULT_KEEP: usize = 100;
@@ -15,8 +15,8 @@ pub const DEFAULT_KEEP: usize = 100;
 /// Resolve the directory that holds per-Run subdirectories.
 ///
 /// Precedence: an explicit `override_dir` (from `--log-dir`/env) is used
-/// verbatim; otherwise `$XDG_STATE_HOME/agent-orchestrator/runs`; otherwise the
-/// XDG default `~/.local/state/agent-orchestrator/runs`. With no home either, a
+/// verbatim; otherwise `$XDG_STATE_HOME/automedon/runs`; otherwise the
+/// XDG default `~/.local/state/automedon/runs`. With no home either, a
 /// relative path is the last resort so a Run can still be logged.
 pub fn runs_dir(
     override_dir: Option<&str>,
@@ -35,7 +35,7 @@ pub fn runs_dir(
 }
 
 /// Resolve a Run's ephemeral Run Directory (`$RUN_DIR`):
-/// `<temp_root>/agent-orchestrator/runs/<run-id>/` (ADR-0010). It shares its
+/// `<temp_root>/automedon/runs/<run-id>/` (ADR-0010). It shares its
 /// `run_id` with the durable log dir but lives under the OS temp root, not state,
 /// so the two correlate yet have independent lifecycles. Pure (the caller passes
 /// `std::env::temp_dir()`) so the layout is unit-testable without env access.
@@ -81,19 +81,19 @@ mod tests {
     #[test]
     fn xdg_state_home_used_when_no_override() {
         let got = runs_dir(None, Some("/xdg"), Some("/home"));
-        assert_eq!(got, PathBuf::from("/xdg/agent-orchestrator/runs"));
+        assert_eq!(got, PathBuf::from("/xdg/automedon/runs"));
     }
 
     #[test]
     fn home_default_used_when_no_xdg() {
         let got = runs_dir(None, None, Some("/home/u"));
-        assert_eq!(got, PathBuf::from("/home/u/.local/state/agent-orchestrator/runs"));
+        assert_eq!(got, PathBuf::from("/home/u/.local/state/automedon/runs"));
     }
 
     #[test]
     fn run_scratch_dir_is_under_the_temp_root_keyed_by_run_id() {
         let got = super::run_scratch_dir(&PathBuf::from("/tmp"), "01234567-run");
-        assert_eq!(got, PathBuf::from("/tmp/agent-orchestrator/runs/01234567-run"));
+        assert_eq!(got, PathBuf::from("/tmp/automedon/runs/01234567-run"));
     }
 
     #[test]

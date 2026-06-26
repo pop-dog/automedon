@@ -75,11 +75,11 @@ fn sole_run_dir(log_dir: &Path) -> PathBuf {
 }
 
 /// The expected ephemeral `$RUN_DIR` for a Run logged to `log_dir`, mirroring the
-/// engine's resolver (`<temp_root>/agent-orchestrator/runs/<run-id>`).
+/// engine's resolver (`<temp_root>/automedon/runs/<run-id>`).
 fn run_scratch_dir(log_dir: &Path) -> PathBuf {
     let run_id = sole_run_dir(log_dir);
     let run_id = run_id.file_name().unwrap().to_str().unwrap();
-    std::env::temp_dir().join("agent-orchestrator").join("runs").join(run_id)
+    std::env::temp_dir().join("automedon").join("runs").join(run_id)
 }
 
 /// The repo working tree the Steps operate on (cwd of a Run, per `run_coder`).

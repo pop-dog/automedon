@@ -59,7 +59,7 @@ the repo the coder reads, edits, and commits.
   stderr on a failed Run. The coder leaves `FINDINGS.md` (review findings) and
   `BUILD_FAILURE.md` (build/test output) there — read them while refining the
   `TASK.md`.
-- The durable log under `~/.local/state/agent-orchestrator/runs/<run-id>/` (newest
+- The durable log under `~/.local/state/automedon/runs/<run-id>/` (newest
   sorts last) holds each Step's `.stderr` sidecar; read the failing Step's to see
   why it failed. The `agent-orchestrator` skill documents the log layout.
 
