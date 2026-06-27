@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::event::{Event, Fault};
 use crate::ir::{Gate, GateKey, GateTarget, Registry, Step, StepBody, Workflow, DEFAULT_BUDGET};
-use crate::{Sink, StepExecutor};
+use crate::{RoutingContract, Sink, StepExecutor};
 
 /// Hardcoded max-Depth default, mirroring [`DEFAULT_BUDGET`].
 pub const DEFAULT_MAX_DEPTH: u32 = 10;
@@ -155,7 +155,11 @@ fn run_frame(
                 StepBody::Command(command) => {
                     let activation = activations[current];
                     *activations.get_mut(current).unwrap() += 1;
-                    let (code, out) = executor.execute(command, &message, current, activation, sink);
+                    // Project the leaf's routing contract once and hand it across
+                    // the seam: "here is how your exit code will be routed."
+                    let contract = RoutingContract::from_step(step);
+                    let (code, out) =
+                        executor.execute(command, &message, current, activation, &contract, sink);
                     sink.emit(&Event::StepExited { step: current.to_string(), code });
                     message = out;
                     match route(step, code) {
@@ -259,7 +263,7 @@ mod tests {
     use super::{run, RunConfig};
     use crate::event::{Event, Fault};
     use crate::ir::{Gate, GateKey, GateTarget, Registry, Step, StepBody, Workflow, DEFAULT_BUDGET};
-    use crate::{Sink, StepExecutor, Stream, SubprocessExecutor};
+    use crate::{RoutingContract, Sink, StepExecutor, Stream, SubprocessExecutor};
 
     /// A Sink that records every emitted Event and every output chunk for
     /// inspection.
@@ -316,6 +320,7 @@ mod tests {
             _in_message: &[u8],
             name: &str,
             activation: u32,
+            _contract: &RoutingContract,
             sink: &mut dyn Sink,
         ) -> (i32, Vec<u8>) {
             let (code, out) = self
