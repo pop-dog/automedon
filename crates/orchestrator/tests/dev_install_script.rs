@@ -32,7 +32,7 @@ fn dev_install_script_reproduces_the_source_build() {
         body.contains("cargo install") && body.contains("crates/orchestrator"),
         "must install the orchestrator crate from source"
     );
-    for skill in ["agent-orchestrator", "autocoder"] {
+    for skill in ["automedon", "autocoder"] {
         assert!(
             body.contains(skill),
             "must symlink the bundled {skill} skill"

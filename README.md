@@ -69,6 +69,21 @@ the published checksums, and installs it to `~/.local/bin` (override with
 `--bin-dir <dir>` or `AUTOMEDON_BIN_DIR`). Pin a version with `--version <v>` or
 the `VERSION` env var.
 
+### Installing the Claude skill
+
+The `automedon` Claude skill — the engine's operating reference for driving a
+Workflow — installs the same way, with no clone needed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pop-dog/automedon/main/install-skill.sh | bash
+```
+
+It copies the skill into `~/.claude/skills/automedon` (override with
+`--skills-dir <dir>` or `AUTOMEDON_SKILLS_DIR`); pick a source ref with `--ref
+<ref>` or `AUTOMEDON_SKILL_REF`. The sibling `autocoder` skill is a repo-only
+example/template for coding this project — it reads repo files at run time and
+has no remote installer; get it by cloning and running `scripts/dev-install.sh`.
+
 Contributors working on the engine build from source instead. This requires a
 [Rust toolchain](https://rustup.rs/) (edition 2021) with `cargo`:
 

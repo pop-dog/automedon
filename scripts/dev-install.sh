@@ -28,10 +28,10 @@ cargo install --path "$repo_root/crates/orchestrator"
 # directory of the same name without following the link into this repo, so the
 # fresh symlink replaces it cleanly instead of nesting inside it.
 mkdir -p "$skills_dir"
-for skill in agent-orchestrator autocoder; do
+for skill in automedon autocoder; do
     rm -rf "$skills_dir/$skill"
     ln -s "$repo_root/skills/$skill" "$skills_dir/$skill"
     echo "linked $skills_dir/$skill -> $repo_root/skills/$skill"
 done
 
-echo "Installed: automedon (binary) and skills (agent-orchestrator, autocoder)."
+echo "Installed: automedon (binary) and skills (automedon, autocoder)."

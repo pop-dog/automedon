@@ -1,6 +1,6 @@
-# Operating the agent-orchestrator engine
+# Operating the Automedon engine
 
-A self-contained operating reference for the `agent-orchestrator` skill: how to
+A self-contained operating reference for the `automedon` skill: how to
 run a Workflow, read its trace, interpret exit codes, and find its logs. It
 covers the engine mechanics only — it is Workflow-agnostic.
 
@@ -15,8 +15,8 @@ A Workflow is a `.yaml` template — a directed graph of Steps the engine execut
 Run it with the installed binary:
 
 ```sh
-orchestrator <workflow.yaml> --message "<text>"
-echo '<text>' | orchestrator <workflow.yaml>   # Message piped on stdin
+automedon <workflow.yaml> --message "<text>"
+echo '<text>' | automedon <workflow.yaml>   # Message piped on stdin
 ```
 
 - **Working directory.** The engine runs each Step in the current directory and

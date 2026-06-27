@@ -25,15 +25,15 @@ fn skills_invoke_the_renamed_binary() {
         "autocoder must run the coder Workflow with `automedon`"
     );
 
-    let engine = skill("agent-orchestrator");
+    let engine = skill("automedon");
     assert!(
         engine.contains("automedon <workflow.yaml>"),
-        "agent-orchestrator must show the `automedon` invocation"
+        "automedon must show the `automedon` invocation"
     );
 
     // The removed command name must not survive as a runnable invocation;
     // following it verbatim yields `command not found`.
-    for (name, body) in [("autocoder", &autocoder), ("agent-orchestrator", &engine)] {
+    for (name, body) in [("autocoder", &autocoder), ("automedon", &engine)] {
         assert!(
             !body.contains("orchestrator examples/"),
             "{name} still invokes the removed `orchestrator` command"
@@ -55,9 +55,9 @@ fn skills_point_at_the_renamed_run_log_directory() {
     // rebrand (see crates/orchestrator/src/config.rs). The skills hand agents
     // this path to read a failed Run's `.stderr` sidecars, so a stale
     // `agent-orchestrator/runs` segment sends them to a directory the engine no
-    // longer writes. The bare skill name `agent-orchestrator` (without `/runs`)
+    // longer writes. The bare skill name `automedon` (without `/runs`)
     // legitimately survives and is not matched here.
-    for name in ["autocoder", "agent-orchestrator"] {
+    for name in ["autocoder", "automedon"] {
         let body = skill(name);
         assert!(
             !body.contains("agent-orchestrator/runs"),
@@ -68,24 +68,23 @@ fn skills_point_at_the_renamed_run_log_directory() {
     // The engine skill is where the durable-log layout is documented; it must
     // name the relocated path so agents look in the right place.
     assert!(
-        skill("agent-orchestrator").contains("automedon/runs"),
-        "agent-orchestrator must document the relocated `automedon/runs` log path"
+        skill("automedon").contains("automedon/runs"),
+        "automedon must document the relocated `automedon/runs` log path"
     );
 }
 
 #[test]
 fn engine_skill_uses_the_automedon_product_label() {
     // The rebrand carries the product label `Agent Orchestrator` -> `Automedon`
-    // through the docs, including the engine skill's run-section heading. The
-    // skill *name* (`agent-orchestrator`, the directory) is deliberately kept.
-    let engine = skill("agent-orchestrator");
+    // through the docs, including the engine skill's run-section heading.
+    let engine = skill("automedon");
     assert!(
         engine.contains("## Automedon — run a Workflow"),
-        "agent-orchestrator must head its run section with the `Automedon` label"
+        "automedon must head its run section with the `Automedon` label"
     );
     assert!(
         !engine.contains("## Agent Orchestrator"),
-        "agent-orchestrator still carries the pre-rebrand `Agent Orchestrator` label"
+        "automedon still carries the pre-rebrand `Agent Orchestrator` label"
     );
 }
 
@@ -94,7 +93,7 @@ fn skills_rebuild_the_engine_with_the_dev_install_script() {
     // `install.sh` now downloads a prebuilt release; rebuilding the engine from
     // source is `scripts/dev-install.sh`. The skills' "re-install after engine
     // changes" guidance must point there, never at `./install.sh`.
-    for name in ["autocoder", "agent-orchestrator"] {
+    for name in ["autocoder", "automedon"] {
         let body = skill(name);
         assert!(
             body.contains("scripts/dev-install.sh"),
