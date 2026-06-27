@@ -1,15 +1,20 @@
 ---
 name: autocoder
-description: Implement a coding task in the agent-orchestrator project by driving its bundled coder Workflow (code → review → commit) instead of editing the repo directly. You write a TASK.md; the Workflow's agents write the code. Use when asked to code or fix an issue in the agent-orchestrator project via the orchestrator.
+description: Implement a coding task in the Automedon project by driving its bundled coder Workflow (code → review → commit) instead of editing the repo directly. You write a TASK.md; the Workflow's agents write the code. Use when asked to code or fix an issue in the Automedon project via Automedon.
 ---
 
 ## Autocoder — code a task with the coder Workflow
 
 Implement a task by running the bundled `code → review → commit` coder Workflow.
 You write a `TASK.md`; the Workflow's agents do the coding. This skill builds on
-the **`agent-orchestrator`** skill (the engine mechanics — invocation, traces,
+the **`automedon`** skill (the engine mechanics — invocation, traces,
 exit codes, logs); activate that skill for anything about running the binary or
 reading a Run.
+
+**This skill is repo-only.** It requires a checkout: it runs
+`examples/coder.yaml`, whose Steps read repo files via `$WORKFLOW_DIR`. There is
+no remote installer for it — it is an example/template for coding the Automedon
+project itself. (The engine `automedon` skill does have a remote installer.)
 
 **Do not edit the project's source yourself.** Your only output is a `TASK.md`.
 Every code change comes from the orchestrator's agents.
@@ -26,7 +31,7 @@ Every code change comes from the orchestrator's agents.
 
 ### Process
 
-Run from the root of the agent-orchestrator checkout — its working directory is
+Run from the root of the Automedon checkout — its working directory is
 the repo the coder reads, edits, and commits.
 
 1. **Read the issue:** `gh issue view <number>`.
@@ -61,7 +66,7 @@ the repo the coder reads, edits, and commits.
   `TASK.md`.
 - The durable log under `~/.local/state/automedon/runs/<run-id>/` (newest
   sorts last) holds each Step's `.stderr` sidecar; read the failing Step's to see
-  why it failed. The `agent-orchestrator` skill documents the log layout.
+  why it failed. The `automedon` skill documents the log layout.
 
 ### On success
 

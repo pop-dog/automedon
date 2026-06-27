@@ -1,12 +1,12 @@
 ---
-name: agent-orchestrator
-description: Run a Workflow on the agent-orchestrator engine — invoke the orchestrator binary with a Workflow template file, then read its trace, exit code, and logs. Use when asked to run, drive, or debug any agent-orchestrator Workflow (a `.yaml` template), or to operate the orchestrator engine in general. For the bundled coder example specifically, use the `autocoder` skill.
+name: automedon
+description: Run a Workflow on the Automedon engine — invoke the `automedon` binary with a Workflow template file, then read its trace, exit code, and logs. Use when asked to run, drive, or debug any Automedon Workflow (a `.yaml` template), or to operate the Automedon engine in general. For the bundled coder example specifically, use the `autocoder` skill.
 ---
 
 ## Automedon — run a Workflow
 
-Drive the `agent-orchestrator` engine: run a **Workflow template** (a `.yaml`
-file) by invoking the `orchestrator` binary, then read its trace and logs. This
+Drive the **Automedon** engine: run a **Workflow template** (a `.yaml`
+file) by invoking the `automedon` binary, then read its trace and logs. This
 skill is the *engine mechanics* and is Workflow-agnostic. For the bundled
 `code → review → commit` coder example, use the **`autocoder`** skill, which
 builds on this one.
