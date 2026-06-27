@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 
-use crate::{Sink, Stream};
+use crate::{RoutingContract, Sink, Stream};
 
 /// Runs one leaf Step's command and reports back its outcome. The whole Step ABI
 /// (ADR-0003 — "a Step is any process that exits with an integer") lives behind
@@ -30,6 +30,7 @@ pub trait StepExecutor {
         in_message: &[u8],
         name: &str,
         activation: u32,
+        contract: &RoutingContract,
         sink: &mut dyn Sink,
     ) -> (i32, Vec<u8>);
 }
@@ -71,14 +72,20 @@ impl StepExecutor for SubprocessExecutor {
         in_message: &[u8],
         name: &str,
         activation: u32,
+        contract: &RoutingContract,
         sink: &mut dyn Sink,
     ) -> (i32, Vec<u8>) {
+        // The routing contract is a per-Step member (ADR-0012): serialise it to
+        // JSON here — the wire format is this adapter's private choice — and
+        // layer it on alongside the Run-constant env members.
+        let gates = serde_json::to_string(contract).expect("routing contract should serialise");
         let mut child = Command::new("sh")
             .arg("-c")
             .arg(command)
             // Layer the Step environment over the inherited env; `envs` adds to
             // (does not clear) what the child would inherit.
             .envs(self.env.iter().map(|(k, v)| (k, v.as_os_str())))
+            .env("AUTOMEDON_GATES", &gates)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -155,13 +162,62 @@ mod tests {
     use std::path::PathBuf;
 
     use super::SubprocessExecutor;
-    use crate::{Event, Sink, StepExecutor};
+    use crate::ir::{Gate, GateKey, GateTarget, Step, StepBody};
+    use crate::{Event, RoutingContract, Sink, StepExecutor};
 
     /// A Sink that ignores everything; these tests assert on the out-Message,
     /// not the output channel.
     struct NullSink;
     impl Sink for NullSink {
         fn emit(&mut self, _event: &Event) {}
+    }
+
+    fn gate(key: GateKey, when: Option<&str>) -> Gate {
+        Gate { key, target: GateTarget::Exit(0), when: when.map(str::to_string) }
+    }
+
+    #[test]
+    fn routing_contract_is_injected_as_automedon_gates() {
+        // The contract a leaf Step would receive rides into the child as
+        // `$AUTOMEDON_GATES`, serialised as the documented JSON array, so the
+        // Step's command can read how its exit code will be routed.
+        let step = Step {
+            body: StepBody::Command("noop".into()),
+            budget: None,
+            gates: vec![
+                gate(GateKey::Code(0), Some("approve")),
+                gate(GateKey::Code(1), Some("revise")),
+                gate(GateKey::Default, Some("escalate")),
+            ],
+        };
+        let contract = RoutingContract::from_step(&step);
+
+        let mut exec = SubprocessExecutor::new();
+        let (code, out) =
+            exec.execute("printf '%s' \"$AUTOMEDON_GATES\"", &[], "s", 0, &contract, &mut NullSink);
+        assert_eq!(code, 0);
+
+        let parsed: Vec<(String, Option<String>)> = serde_json::from_slice::<Vec<RoutingEntryWire>>(&out)
+            .expect("$AUTOMEDON_GATES should parse as the documented JSON array")
+            .into_iter()
+            .map(|e| (e.key, e.when))
+            .collect();
+        assert_eq!(
+            parsed,
+            vec![
+                ("0".to_string(), Some("approve".to_string())),
+                ("1".to_string(), Some("revise".to_string())),
+                ("*".to_string(), Some("escalate".to_string())),
+            ]
+        );
+    }
+
+    /// The on-the-wire shape of one `$AUTOMEDON_GATES` entry, decoded here to
+    /// assert the contract round-trips through the child's environment.
+    #[derive(serde::Deserialize)]
+    struct RoutingEntryWire {
+        key: String,
+        when: Option<String>,
     }
 
     #[test]
@@ -177,6 +233,7 @@ mod tests {
             &[],
             "s",
             0,
+            &RoutingContract::default(),
             &mut NullSink,
         );
         assert_eq!(code, 0);

@@ -9,11 +9,13 @@
 //! Exhaustion, a Run-level Depth cap, and structured Fault propagation across
 //! Frame boundaries.
 
+mod contract;
 mod event;
 mod executor;
 mod ir;
 mod run;
 
+pub use contract::{RoutingContract, RoutingEntry};
 pub use event::{Event, Fault};
 pub use executor::{StepExecutor, SubprocessExecutor};
 pub use ir::{
