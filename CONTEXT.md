@@ -68,12 +68,14 @@ It parses the Workflow file, constructs the [[Sink]]s, mints the Run's UUIDv7
 identity (ADR-0009), establishes the [[Step environment]] (ADR-0010), then runs
 the Kernel's routing loop. Realised as the `orchestrator` crate, which builds the
 `automedon` binary: the crate keeps the descriptive role name while the product
-and binary carry the brand (ADR-0011). Distinct from the [[Kernel]] (which only
+and binary carry the brand (ADR-0011). The binary exposes its behaviour under a
+subcommand (`automedon run <workflow>`), leaving room to add sibling subcommands
+later without disturbing the engine. Distinct from the [[Kernel]] (which only
 routes) and a [[Module]] (an opt-in capability the orchestrator wires in).
 _Avoid_: Engine (that is the Kernel), driver, runner, main, app, host.
 
 **Module**:
-An opt-in layer built on top of the Kernel, never part of it — e.g. an LLM adapter (Gates→prompt generator, output→integer parser). A Module may read kernel-opaque annotations (like a Gate's `when`) but the Kernel never depends on a Module.
+An opt-in layer built on top of the Kernel, never part of it — its defining property is that the Kernel never depends on it. A Module is wired to the Kernel by the orchestrator and runs inside the engine process; a [[Sink]] is the archetype, and observability and durability live here too. A Module may read kernel-opaque annotations (like a Gate's `when`) but the Kernel never reaches back. LLM interfacing is *not* a Module: it lives in a Step's own command, outside the engine entirely, reading the [[Routing contract]] the engine exposes (ADR-0012). The repo ships example helper scripts for it, but they are forkable user-space code, not a layer the engine wires in.
 _Avoid_: Plugin, extension, package.
 
 **Run**:
@@ -105,7 +107,7 @@ An immutable, never-mutated record of one Kernel transition (StepEntered, StepEx
 _Avoid_: Log line, record, Message (a Message is data passed between Steps, not an execution record).
 
 **Sink**:
-A Module that consumes the Kernel's Event stream — e.g. a persistence Sink (the only thing that makes a Run durable), a console trace, or a live monitor. The Kernel publishes Events to zero or more Sinks through a narrow interface (Observer pattern) and never persists anything itself: durability is a Sink's choice, not a Kernel property.
+A [[Module]] that consumes the Kernel's Event stream — e.g. a persistence Sink (the only thing that makes a Run durable), a console trace, or a live monitor. The Kernel publishes Events to zero or more Sinks through a narrow interface (Observer pattern) and never persists anything itself: durability is a Sink's choice, not a Kernel property.
 _Avoid_: Listener, handler, logger, observer (acceptable informally).
 
 ## Workspace
@@ -115,13 +117,17 @@ The filesystem context a Run operates in — the umbrella over the [[Repository]
 _Avoid_: Sandbox, scratch (names only one region), Cargo workspace (an unrelated build concept).
 
 **Repository**:
-The target working tree a Run operates on — the repo whose source the Steps read, edit, build, and commit, and the Run's working directory. Its tracked contents are the deliverable, so orchestration bookkeeping must never land here; that belongs in the [[Run Directory]]. Distinct from where the Workflow's own scripts live (the [[Step environment]]'s `$WORKFLOW_DIR`): a Workflow and the Repository it operates on need not be the same directory.
+The target working tree a Run operates on — the repo whose source the Steps read, edit, build, and commit, and the Run's working directory. Its tracked contents are the deliverable, so orchestration bookkeeping must never land here; that belongs in the [[Run Directory]]. Distinct from where the Workflow's own scripts live (the [[Step environment]]'s `$AUTOMEDON_WORKFLOW_DIR`): a Workflow and the Repository it operates on need not be the same directory.
 _Avoid_: Working directory, target, project, codebase.
 
 **Run Directory**:
-The engine-provided, per-Run scratch directory — the second region of the [[Workspace]] and the home of a Run's bulk bookkeeping (review findings, build logs), kept out of the [[Repository]] so it never pollutes the deliverable and the Steps need not lean on the target repo's `.gitignore`. *Ephemeral*: it lives under the OS temp directory and is reaped by the OS (e.g. on restart); the engine provides it but promises no cleanup, and nothing retains it. Distinct from the **durable run log** (the persistence [[Sink]]'s Events plus Step-output sidecars, under XDG state and pruned by retention) — that log is observability written *about* a Run, not where Steps operate, so it is not part of the Workspace. The engine hands each Step the Run Directory through the [[Step environment]] as `$RUN_DIR`.
+The engine-provided, per-Run scratch directory — the second region of the [[Workspace]] and the home of a Run's bulk bookkeeping (review findings, build logs), kept out of the [[Repository]] so it never pollutes the deliverable and the Steps need not lean on the target repo's `.gitignore`. *Ephemeral*: it lives under the OS temp directory and is reaped by the OS (e.g. on restart); the engine provides it but promises no cleanup, and nothing retains it. Distinct from the **durable run log** (the persistence [[Sink]]'s Events plus Step-output sidecars, under XDG state and pruned by retention) — that log is observability written *about* a Run, not where Steps operate, so it is not part of the Workspace. The engine hands each Step the Run Directory through the [[Step environment]] as `$AUTOMEDON_RUN_DIR`.
 _Avoid_: Scratch dir (informal), temp dir, log dir (that is the separate durable run log).
 
 **Step environment**:
-The ambient, read-only context the [[Step Executor]] establishes for every Step before running it. Constant across the whole Run and identical for every Step, so the engine *broadcasts* it rather than passing it Step-to-Step like a [[Message]] — a fourth channel alongside control (the exit code), data (the Message), and output (Step output to the [[Sink]]). Its members are `$WORKFLOW_DIR` (where the Workflow's scripts live) and `$RUN_DIR` (the [[Run Directory]]). The subprocess Executor realises it as environment variables inherited by each `sh -c` child; the [[Kernel]] never sees it (ADR-0003) — it is the Executor adapter's concern, like Run identity is the orchestrator's (ADR-0009).
+The ambient, read-only context the [[Step Executor]] establishes for every Step before running it. Its *broadcast* members are constant across the whole Run and identical for every Step, so the engine broadcasts them rather than passing them Step-to-Step like a [[Message]] — a fourth channel alongside control (the exit code), data (the Message), and output (Step output to the [[Sink]]). These members are `$AUTOMEDON_WORKFLOW_DIR` (where the Workflow's scripts live) and `$AUTOMEDON_RUN_DIR` (the [[Run Directory]]). The subprocess Executor realises them as environment variables inherited by each `sh -c` child; the [[Kernel]] never sees them (ADR-0003) — it is the Executor adapter's concern, like Run identity is the orchestrator's (ADR-0009). Distinct from the per-Step [[Routing contract]], which the same Executor injects but which varies Step-to-Step (ADR-0012).
 _Avoid_: Env, globals, config, ambient state.
+
+**Routing contract**:
+The Executor-injected, *per-Step* description of how the Step's own exit code will be routed — its `Code` and `Default` [[Gate]]s as `{ key, when }` pairs (no targets, no `EXHAUSTED`/`FAULT`). A generic, [[Kernel]]-owned capability ("here is how your exit code routes"), *not* an LLM feature: the engine never learns what an LLM is. The subprocess Executor serialises it to `$AUTOMEDON_GATES` (JSON); its first consumer is an example LLM helper script a Step sources, which turns the contract into a prompt and parses the reply back into a key. Distinct from the broadcast [[Step environment]] in that it varies Step-to-Step (ADR-0012).
+_Avoid_: Gate table dump, prompt spec, env (it is not part of the broadcast environment).
