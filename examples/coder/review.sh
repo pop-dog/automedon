@@ -27,8 +27,8 @@ fi
 
 # Wrap the /code-review skill. Critical and Major findings are Blocking; Minor
 # and Nit are Suggestions. The agent prints a final sentinel line that maps the
-# review onto the exit code — the bespoke output-to-exit-code parse that the LLM
-# Module will later generalise.
+# review onto the exit code — the bespoke output-to-exit-code parse that a shared
+# example LLM helper (driven by $AUTOMEDON_GATES) will later generalise.
 prompt='Use the /code-review skill to review the unstaged changes. Write the
 findings to a file at '"$RUN_DIR"'/FINDINGS.md, grouping any
 Critical and Major findings under a "## Blocking" heading and any Minor and Nit

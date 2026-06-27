@@ -18,4 +18,4 @@ The tool is an *LLM agent orchestrator*, so the obvious design is to make LLM in
 
 ## Considered and rejected
 
-- **A first-class `LLM Step` type in the Kernel.** Most convenient for authors, but it couples the Kernel to LLM providers, SDKs, and prompt formats, and introduces a second Step kind that breaks Step uniformity and Composite. Rejected in favour of an LLM Module that supplies reusable helpers while the Step stays an ordinary command. See ADR-0002 for how malformed Module output (an unparseable LLM decision) re-uses the Fault channel rather than a bespoke error path.
+- **A first-class `LLM Step` type in the Kernel.** Most convenient for authors, but it couples the Kernel to LLM providers, SDKs, and prompt formats, and introduces a second Step kind that breaks Step uniformity and Composite. Rejected in favour of keeping the Step an ordinary command, with any LLM helpers living Step-side (outside the engine) rather than in the Kernel. See ADR-0002 for how malformed helper output (an unparseable LLM decision) re-uses the Fault channel rather than a bespoke error path.

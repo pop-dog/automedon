@@ -6,7 +6,7 @@ status: accepted
 
 The Kernel runs against an **IR** — the Workflow as plain data (the `Workflow`/`Step`/`Gate`/`GateKey` types it owns) — and never parses an authoring format itself. A **`WorkflowSource` trait** abstracts where that IR comes from; **YAML is the first implementation** (in the `orchestrator` crate, via `serde_yaml`), and a JSON loader or a code-builder could be added later without touching the Kernel. This is the compiler front-end/back-end split: authoring is the front-end, the Kernel the back-end, the IR the contract between them — keeping the authoring surface open (ADR-pending) while letting the Kernel language be decided in isolation (ADR-0006).
 
-The codebase is a **Cargo workspace**: `crates/kernel` (the engine) is a separate crate from the Modules (Sinks today; an LLM adapter later). The dependency arrows physically enforce ADR-0003: `orchestrator` → `kernel`, never the reverse, so the Kernel cannot accidentally depend on a Module.
+The codebase is a **Cargo workspace**: `crates/kernel` (the engine) is a separate crate from the Modules (Sinks). The dependency arrows physically enforce ADR-0003: `orchestrator` → `kernel`, never the reverse, so the Kernel cannot accidentally depend on a Module.
 
 ## Notes
 

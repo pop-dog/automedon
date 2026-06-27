@@ -1,7 +1,7 @@
 //! The Kernel — the Workflow engine and *only* the engine (ADR-0003 microkernel).
 //! It invokes Steps, routes Gates, manages the Frame/Budget, raises Faults, and
-//! emits Events. It is LLM- and data-agnostic. Modules (Sinks, an LLM adapter)
-//! live outside and depend on the Kernel, never the reverse.
+//! emits Events. It is LLM- and data-agnostic. Modules (e.g. Sinks) live outside
+//! and depend on the Kernel, never the reverse.
 //!
 //! Current scope: a Frame stack over a Workflow registry (Composite Steps run a
 //! named child sub-Workflow and surface its code), subprocess leaf Steps,
