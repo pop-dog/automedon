@@ -130,9 +130,9 @@ fn main() {
     });
     let path = cli.path;
 
-    // The workflow definition's directory becomes $WORKFLOW_DIR (a Step
+    // The workflow definition's directory becomes $AUTOMEDON_WORKFLOW_DIR (a Step
     // environment member, below) so a Step can locate the scripts it names (e.g.
-    // `command: "$WORKFLOW_DIR/fetch.sh"`) independently of the working directory.
+    // `command: "$AUTOMEDON_WORKFLOW_DIR/fetch.sh"`) independently of the working directory.
     // This decouples *where the scripts live* (the workflow repo) from *where the
     // work happens*: the cwd is left as the target project root — the repo a Step
     // reads, edits, and commits — so a workflow and the repo it operates on need
@@ -177,7 +177,7 @@ fn main() {
     let run_id = uuid::Uuid::now_v7();
     let log_dir = runs_dir.join(run_id.to_string());
 
-    // The ephemeral Run Directory ($RUN_DIR): per-Run scratch the engine provides
+    // The ephemeral Run Directory ($AUTOMEDON_RUN_DIR): per-Run scratch the engine provides
     // under the OS temp root, sharing this Run's id with the durable log dir but
     // with an independent (OS-reaped) lifecycle (ADR-0010). Created best-effort
     // before the first Step runs; a Run whose scratch cannot be made still runs.
@@ -188,10 +188,10 @@ fn main() {
 
     // The Step environment: the ambient, Run-constant context every Step receives
     // (ADR-0010). The Executor injects it per-spawn, retiring the previous global
-    // `set_var("WORKFLOW_DIR")`. Logging whatever it holds covers future members.
+    // `set_var("AUTOMEDON_WORKFLOW_DIR")`. Logging whatever it holds covers future members.
     let environment: Vec<(String, PathBuf)> = vec![
-        ("WORKFLOW_DIR".to_string(), workflow_dir),
-        ("RUN_DIR".to_string(), run_dir.clone()),
+        ("AUTOMEDON_WORKFLOW_DIR".to_string(), workflow_dir),
+        ("AUTOMEDON_RUN_DIR".to_string(), run_dir.clone()),
     ];
 
     let mut sink_chain: Vec<Box<dyn Sink>> = vec![Box::new(ConsoleSink::new(cli.quiet))];

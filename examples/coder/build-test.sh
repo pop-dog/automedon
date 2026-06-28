@@ -3,7 +3,7 @@
 # `review`. Read the TASK.md path from stdin and re-emit it on stdout (the
 # Message is just relayed). Build the project and run the whole test suite; exit
 # 0 on green (route to review), non-zero on red (route back to code). On red the
-# combined build/test output is written to $RUN_DIR/BUILD_FAILURE.md so the next
+# combined build/test output is written to $AUTOMEDON_RUN_DIR/BUILD_FAILURE.md so the next
 # `code` pass can act on it; on green that file is removed.
 set -u
 
@@ -11,7 +11,7 @@ set -u
 # never in the Repository this Step operates on. Fail loud if it is missing: a cwd
 # fallback would pollute the deliverable and a per-script mktemp would break the
 # cross-Step handoff (review writes the findings that the next code pass reads).
-: "${RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
+: "${AUTOMEDON_RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
 
 task_path="$(cat)"
 
@@ -24,7 +24,7 @@ if [ "${CODER_STUB:-}" = "1" ]; then
     case "${CODER_STUB_BUILD:-pass}" in
         fail) exit 1 ;;
         fail-once)
-            marker="${CODER_STUB_BUILD_MARKER:-$RUN_DIR/.build-stub-marker}"
+            marker="${CODER_STUB_BUILD_MARKER:-$AUTOMEDON_RUN_DIR/.build-stub-marker}"
             [ -f "$marker" ] && exit 0
             : > "$marker"
             exit 1
@@ -38,7 +38,7 @@ fi
 log="$(mktemp)"
 if { cargo build && cargo test; } > "$log" 2>&1; then
     cat "$log" 1>&2
-    rm -f "$log" "$RUN_DIR/BUILD_FAILURE.md"
+    rm -f "$log" "$AUTOMEDON_RUN_DIR/BUILD_FAILURE.md"
     printf '%s' "$task_path"
     exit 0
 fi
@@ -50,7 +50,7 @@ cat "$log" 1>&2
     printf '```\n'
     cat "$log"
     printf '```\n'
-} > "$RUN_DIR/BUILD_FAILURE.md"
+} > "$AUTOMEDON_RUN_DIR/BUILD_FAILURE.md"
 rm -f "$log"
 printf '%s' "$task_path"
 exit 1

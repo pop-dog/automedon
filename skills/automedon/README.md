@@ -32,10 +32,10 @@ echo '<text>' | automedon run <workflow.yaml>   # Message piped on stdin
 Before running a Step, the engine injects an ambient, Run-constant context every
 Step inherits, distinct from the Message:
 
-- **`$WORKFLOW_DIR`** — the directory of the Workflow file, so a Step can name its
-  scripts (`command: "$WORKFLOW_DIR/build.sh"`) independently of the working
+- **`$AUTOMEDON_WORKFLOW_DIR`** — the directory of the Workflow file, so a Step can name its
+  scripts (`command: "$AUTOMEDON_WORKFLOW_DIR/build.sh"`) independently of the working
   directory.
-- **`$RUN_DIR`** — an ephemeral, per-Run scratch directory under the OS temp dir
+- **`$AUTOMEDON_RUN_DIR`** — an ephemeral, per-Run scratch directory under the OS temp dir
   (`<temp>/automedon/runs/<run-id>/`), for bulk bookkeeping a Step must
   keep out of the working repository. It is created before the first Step runs and
   reaped by the OS (no retention), shares its `<run-id>` with the durable log dir,
@@ -87,9 +87,9 @@ last). Each directory holds:
   sidecar per stream per activation, referenced from `events.jsonl`. To see *why*
   a Step failed, read its `.stderr` sidecar.
 - **`meta.json`** — orchestrator-owned Run metadata (currently the Step
-  environment, including `$RUN_DIR`), kept out of the Kernel's `events.jsonl`.
+  environment, including `$AUTOMEDON_RUN_DIR`), kept out of the Kernel's `events.jsonl`.
 
-The ephemeral `$RUN_DIR` scratch is *separate* from this durable log: same
+The ephemeral `$AUTOMEDON_RUN_DIR` scratch is *separate* from this durable log: same
 `<run-id>`, but under the OS temp dir and reaped by the OS, not retained here.
 
 ## Flags

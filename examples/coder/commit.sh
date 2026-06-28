@@ -8,7 +8,7 @@ set -u
 # never in the Repository this Step operates on. Fail loud if it is missing: a cwd
 # fallback would pollute the deliverable and a per-script mktemp would break the
 # cross-Step handoff (review writes the findings that the next code pass reads).
-: "${RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
+: "${AUTOMEDON_RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
 
 task_path="$(cat)"
 
@@ -32,7 +32,7 @@ code=$?
 # so the shared findings file is discarded. The escalation path never reaches
 # this Step, so a spent-Budget run instead leaves the findings in place.
 if [ "$code" -eq 0 ]; then
-    rm -f "$RUN_DIR/FINDINGS.md"
+    rm -f "$AUTOMEDON_RUN_DIR/FINDINGS.md"
 fi
 
 printf '%s' "$task_path"

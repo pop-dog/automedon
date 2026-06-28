@@ -36,7 +36,7 @@ fn run_coder(extra_env: &[(&str, &str)]) -> i32 {
 /// As `run_coder`, but logs Runs to `log_dir` so the caller can inspect (and own
 /// the lifetime of) the resulting Run directories.
 fn run_coder_logging_to(log_dir: &Path, extra_env: &[(&str, &str)]) -> i32 {
-    // The Steps locate their scripts via $WORKFLOW_DIR (set by the orchestrator
+    // The Steps locate their scripts via $AUTOMEDON_WORKFLOW_DIR (set by the orchestrator
     // from the yaml's path), so the child needs no particular cwd to find them.
     // We run from the repo root because that is the workspace the Steps read
     // (./TASK.md) and write (FINDINGS.md).
@@ -75,7 +75,7 @@ fn sole_run_dir(log_dir: &Path) -> PathBuf {
     runs.remove(0)
 }
 
-/// The expected ephemeral `$RUN_DIR` for a Run logged to `log_dir`, mirroring the
+/// The expected ephemeral `$AUTOMEDON_RUN_DIR` for a Run logged to `log_dir`, mirroring the
 /// engine's resolver (`<temp_root>/automedon/runs/<run-id>`).
 fn run_scratch_dir(log_dir: &Path) -> PathBuf {
     let run_id = sole_run_dir(log_dir);
@@ -90,7 +90,7 @@ fn repo_root() -> PathBuf {
 
 #[test]
 fn coder_scripts_fail_loud_when_run_dir_is_unset() {
-    // The Steps are orchestrator Steps; the engine always provides $RUN_DIR. With
+    // The Steps are orchestrator Steps; the engine always provides $AUTOMEDON_RUN_DIR. With
     // it unset, each script must error with a clear message rather than silently
     // falling back to cwd (which would reintroduce the repo coupling) or mktemp
     // (which would break the cross-Step file handoff). CODER_STUB=1 keeps the
@@ -98,19 +98,19 @@ fn coder_scripts_fail_loud_when_run_dir_is_unset() {
     for script in ["review.sh", "build-test.sh", "code.sh", "commit.sh"] {
         let output = Command::new("/bin/sh")
             .arg(coder_script(script))
-            .env_remove("RUN_DIR")
+            .env_remove("AUTOMEDON_RUN_DIR")
             .env("CODER_STUB", "1")
             .stdin(std::process::Stdio::null())
             .output()
             .expect("failed to run coder script");
         assert!(
             !output.status.success(),
-            "{script} should fail when RUN_DIR is unset"
+            "{script} should fail when AUTOMEDON_RUN_DIR is unset"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("RUN_DIR"),
-            "{script} should name RUN_DIR in its error; got: {stderr}"
+            stderr.contains("AUTOMEDON_RUN_DIR"),
+            "{script} should name AUTOMEDON_RUN_DIR in its error; got: {stderr}"
         );
     }
 }
@@ -168,11 +168,11 @@ fn transient_build_failure_is_retried_then_succeeds() {
     // The stub's "failed once" marker is orchestration scratch: it must land in
     // the ephemeral Run Directory and never in the Repository working tree. The
     // marker survives the Run (the second build-test reads but does not remove
-    // it), so it is the observable proof that scratch is repointed at $RUN_DIR.
+    // it), so it is the observable proof that scratch is repointed at $AUTOMEDON_RUN_DIR.
     let scratch = run_scratch_dir(&log_dir.0);
     assert!(
         scratch.join(".build-stub-marker").exists(),
-        "stub scratch should land in $RUN_DIR: {}",
+        "stub scratch should land in $AUTOMEDON_RUN_DIR: {}",
         scratch.display()
     );
     for artifact in [".build-stub-marker", "FINDINGS.md", "BUILD_FAILURE.md"] {

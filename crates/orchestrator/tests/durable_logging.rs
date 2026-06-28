@@ -122,20 +122,20 @@ workflows:
     // The Step environment is recorded once as orchestrator-owned metadata.
     let meta: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("meta.json")).unwrap()).unwrap();
-    let scratch = meta["environment"]["RUN_DIR"].as_str().expect("RUN_DIR recorded");
-    assert!(meta["environment"]["WORKFLOW_DIR"].is_string(), "WORKFLOW_DIR recorded");
+    let scratch = meta["environment"]["AUTOMEDON_RUN_DIR"].as_str().expect("AUTOMEDON_RUN_DIR recorded");
+    assert!(meta["environment"]["AUTOMEDON_WORKFLOW_DIR"].is_string(), "AUTOMEDON_WORKFLOW_DIR recorded");
 
     // The Run Directory is ephemeral (under the OS temp root) and shares its
     // run-id with the durable log dir, yet is a distinct directory.
     let scratch = PathBuf::from(scratch);
-    assert!(scratch.starts_with(std::env::temp_dir()), "RUN_DIR under the OS temp root");
+    assert!(scratch.starts_with(std::env::temp_dir()), "AUTOMEDON_RUN_DIR under the OS temp root");
     assert_eq!(scratch.file_name().unwrap().to_str().unwrap(), run_id, "shares the run-id");
     assert!(scratch.exists(), "the Run Directory exists after the Run");
     let _ = std::fs::remove_dir_all(&scratch);
 
     // The env values are not duplicated into the Kernel's control-plane log.
     let log = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
-    assert!(!log.contains("RUN_DIR"), "the Step environment stays out of events.jsonl");
+    assert!(!log.contains("AUTOMEDON_RUN_DIR"), "the Step environment stays out of events.jsonl");
 }
 
 #[test]
@@ -182,7 +182,7 @@ workflows:
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
-/// The expected `$RUN_DIR` for a given run-id, mirroring the engine's resolver.
+/// The expected `$AUTOMEDON_RUN_DIR` for a given run-id, mirroring the engine's resolver.
 fn config_run_scratch_dir(run_id: &str) -> PathBuf {
     std::env::temp_dir().join("automedon").join("runs").join(run_id)
 }

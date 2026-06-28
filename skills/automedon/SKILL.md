@@ -57,6 +57,6 @@ Every Run writes a durable log directory under
 `~/.local/state/automedon/runs/<run-id>/` (newest sorts last by
 UUIDv7): `events.jsonl` (the control trace) plus per-Step `.stderr`/`.stdout`
 sidecars. To see *why* a Step failed, read its `.stderr` sidecar. A failed Run
-also prints its ephemeral scratch directory (`$RUN_DIR`) to stderr. The full
+also prints its ephemeral scratch directory (`$AUTOMEDON_RUN_DIR`) to stderr. The full
 layout and the `--log-dir` / `--keep` / `-q` / `--max-depth` flags are in
 `./README.md`.

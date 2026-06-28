@@ -34,7 +34,7 @@ pub fn runs_dir(
     state_root.join(APP_DIR).join("runs")
 }
 
-/// Resolve a Run's ephemeral Run Directory (`$RUN_DIR`):
+/// Resolve a Run's ephemeral Run Directory (`$AUTOMEDON_RUN_DIR`):
 /// `<temp_root>/automedon/runs/<run-id>/` (ADR-0010). It shares its
 /// `run_id` with the durable log dir but lives under the OS temp root, not state,
 /// so the two correlate yet have independent lifecycles. Pure (the caller passes

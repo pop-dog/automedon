@@ -37,7 +37,7 @@ pub trait StepExecutor {
 
 /// The production [`StepExecutor`]: each Step is an `sh -c` subprocess with the
 /// working directory inherited. Carries the Step environment — the ambient,
-/// Run-constant context (`$WORKFLOW_DIR`, `$RUN_DIR`) the engine provides — and
+/// Run-constant context (`$AUTOMEDON_WORKFLOW_DIR`, `$AUTOMEDON_RUN_DIR`) the engine provides — and
 /// layers it onto every spawn's inherited env (ADR-0010). Constant for the Run.
 #[derive(Default)]
 pub struct SubprocessExecutor {
@@ -225,11 +225,11 @@ mod tests {
         // Both Step environment members ride into the child as real environment
         // variables, so a command can read what the engine provided.
         let mut exec = SubprocessExecutor::with_env(vec![
-            ("WORKFLOW_DIR".to_string(), PathBuf::from("/wf")),
-            ("RUN_DIR".to_string(), PathBuf::from("/tmp/automedon/runs/abc")),
+            ("AUTOMEDON_WORKFLOW_DIR".to_string(), PathBuf::from("/wf")),
+            ("AUTOMEDON_RUN_DIR".to_string(), PathBuf::from("/tmp/automedon/runs/abc")),
         ]);
         let (code, out) = exec.execute(
-            "printf '%s|%s' \"$WORKFLOW_DIR\" \"$RUN_DIR\"",
+            "printf '%s|%s' \"$AUTOMEDON_WORKFLOW_DIR\" \"$AUTOMEDON_RUN_DIR\"",
             &[],
             "s",
             0,

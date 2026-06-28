@@ -120,7 +120,7 @@ sub-Workflow loops `code → build-test → review`. `code` and `review` are bes
 entry Message is the path to a `TASK.md` file; a red build or a Blocking review
 loops back to `code` (bounded by its Budget), and on non-convergence the
 `EXHAUSTED` Gate escalates with `EXIT 90`, leaving the unstaged changes for a
-human and the review findings in the Run's scratch directory (`$RUN_DIR`, printed
+human and the review findings in the Run's scratch directory (`$AUTOMEDON_RUN_DIR`, printed
 on a failed Run — see "Step environment"). Run it from the repo root:
 
 ```sh
@@ -143,10 +143,10 @@ Before running a Step, the orchestrator injects an ambient, Run-constant **Step
 environment** — read-only context every Step inherits, distinct from the Message
 it is piped:
 
-- `$WORKFLOW_DIR` — the directory of the Workflow file, so a Step can name its
-  scripts (`command: "$WORKFLOW_DIR/build.sh"`) independently of the working
+- `$AUTOMEDON_WORKFLOW_DIR` — the directory of the Workflow file, so a Step can name its
+  scripts (`command: "$AUTOMEDON_WORKFLOW_DIR/build.sh"`) independently of the working
   directory (left as the target repository the Step operates on).
-- `$RUN_DIR` — an ephemeral, per-Run scratch directory under the OS temp dir
+- `$AUTOMEDON_RUN_DIR` — an ephemeral, per-Run scratch directory under the OS temp dir
   (`<temp>/automedon/runs/<run-id>/`), for bulk bookkeeping a Step must
   keep out of that repository. It is created before the first Step runs and reaped
   by the OS (no retention), shares its `<run-id>` with the durable log dir, is
@@ -169,7 +169,7 @@ holds:
   sidecar per stream per activation, referenced from `events.jsonl`. To see *why*
   a Step failed, read its `.stderr` sidecar.
 - `meta.json` — orchestrator-owned Run metadata (currently the Step environment,
-  including `$RUN_DIR`), kept out of the Kernel's `events.jsonl` (ADR-0003/0010).
+  including `$AUTOMEDON_RUN_DIR`), kept out of the Kernel's `events.jsonl` (ADR-0003/0010).
 
 This separation of a lean control-plane log from bulk output is
 [ADR-0009](docs/adr/0009-step-output-on-a-dedicated-sink-channel.md); the Kernel

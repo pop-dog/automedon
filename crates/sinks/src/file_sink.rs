@@ -237,21 +237,21 @@ mod tests {
         {
             let sink = FileSink::create(run_dir.clone()).unwrap();
             sink.record_environment(&[
-                ("WORKFLOW_DIR".to_string(), PathBuf::from("/wf")),
-                ("RUN_DIR".to_string(), PathBuf::from("/tmp/runs/abc")),
+                ("AUTOMEDON_WORKFLOW_DIR".to_string(), PathBuf::from("/wf")),
+                ("AUTOMEDON_RUN_DIR".to_string(), PathBuf::from("/tmp/runs/abc")),
             ]);
         }
         // The Step environment lands in an orchestrator-owned metadata file, not
         // in the Kernel's events.jsonl (ADR-0003/0010).
         assert!(!run_dir.join("events.jsonl").exists() || {
             let log = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
-            !log.contains("RUN_DIR")
+            !log.contains("AUTOMEDON_RUN_DIR")
         });
         let meta: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(run_dir.join("meta.json")).unwrap())
                 .unwrap();
-        assert_eq!(meta["environment"]["WORKFLOW_DIR"], "/wf");
-        assert_eq!(meta["environment"]["RUN_DIR"], "/tmp/runs/abc");
+        assert_eq!(meta["environment"]["AUTOMEDON_WORKFLOW_DIR"], "/wf");
+        assert_eq!(meta["environment"]["AUTOMEDON_RUN_DIR"], "/tmp/runs/abc");
     }
 
     #[test]
