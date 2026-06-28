@@ -7,16 +7,10 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use kernel::{
-    Event, Fault, GateKey, GateTarget, Registry, RunConfig, Sink, Stream, SubprocessExecutor,
-    WorkflowSource,
-};
+use kernel::{Registry, RunConfig, Sink, SubprocessExecutor, WorkflowSource};
+use sinks::{ConsoleSink, FileSink, Tee};
 
-mod config;
-mod file_sink;
 mod loader;
-mod retention;
-mod tee;
 
 /// A `WorkflowSource` that parses a Workflow registry from a root YAML file
 /// (`root:` + `workflows:`), transitively loading any files its Composite Steps
@@ -29,97 +23,6 @@ struct YamlSource {
 impl WorkflowSource for YamlSource {
     fn load(&self) -> Result<Registry, Box<dyn std::error::Error>> {
         loader::load(&self.path)
-    }
-}
-
-// ANSI helpers, to avoid a styling-crate dependency.
-const B: &str = "\x1b[1m"; // bold
-const D: &str = "\x1b[2m"; // dim
-const R: &str = "\x1b[0m"; // reset
-
-/// A trace Sink: one line per Kernel transition, plus a live tee of Step output
-/// (dim, step-prefixed) on stderr. `quiet` suppresses the output tee for a
-/// control-only trace; the control Events still print.
-struct ConsoleSink {
-    quiet: bool,
-}
-
-impl Sink for ConsoleSink {
-    fn emit(&mut self, event: &Event) {
-        println!("{}", render(event));
-    }
-
-    fn on_output(&mut self, step: &str, _activation: u32, _stream: Stream, bytes: &[u8]) {
-        if self.quiet {
-            return;
-        }
-        // Tee to stderr so Step output never mixes with a downstream consumer
-        // of the orchestrator's stdout.
-        eprint!("{}", dim_prefixed(step, bytes));
-    }
-}
-
-/// Render a chunk of Step output as dim, step-prefixed lines for the live view.
-fn dim_prefixed(step: &str, bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    text.lines()
-        .map(|line| format!("  {D}{step} ▏ {line}{R}\n"))
-        .collect()
-}
-
-fn render(event: &Event) -> String {
-    match event {
-        Event::RunStarted => format!("{B}● RUN started{R}"),
-        Event::StepEntered { step } => format!("  {B}▶ enter{R} {step}"),
-        Event::StepExited { step, code } => format!("  {D}■ exit{R}  {step} {D}->{R} code {B}{code}{R}"),
-        Event::BudgetConsumed { step, remaining } => {
-            format!("  {D}· budget {step}: {remaining} left{R}")
-        }
-        Event::Exhausted { step } => format!("  {B}⊘ EXHAUSTED{R} {step} {D}(budget spent){R}"),
-        Event::FramePushed { step, workflow, depth } => {
-            format!("  {B}╆ push{R} {step} {D}->{R} {workflow} {D}(depth {depth}){R}")
-        }
-        Event::FramePopped { step, workflow } => {
-            format!("  {D}╄ pop{R}   {step} {D}<-{R} {workflow}")
-        }
-        Event::GateTaken { step, key, target } => {
-            format!("  {D}↳ gate{R} {step} {D}[{}]{R} {D}->{R} {}", fmt_key(key), fmt_target(target))
-        }
-        Event::MessagePassed { from, to, bytes } => {
-            format!("  {D}✉ message {from} -> {to} ({bytes} bytes){R}")
-        }
-        Event::FaultRaised { fault } => format!("  {B}✗ FAULT{R} {}", fmt_fault(fault)),
-        Event::RunEnded { code } => format!("{B}◆ RUN ended -> exit {code}{R}"),
-    }
-}
-
-fn fmt_key(key: &GateKey) -> String {
-    match key {
-        GateKey::Code(n) => n.to_string(),
-        GateKey::Default => "*".to_string(),
-        GateKey::Exhausted => "EXHAUSTED".to_string(),
-        GateKey::Fault => "FAULT".to_string(),
-    }
-}
-
-fn fmt_target(target: &GateTarget) -> String {
-    match target {
-        GateTarget::Step(s) => s.clone(),
-        GateTarget::Exit(code) => format!("EXIT {code}"),
-    }
-}
-
-fn fmt_fault(fault: &Fault) -> String {
-    match fault {
-        Fault::UnhandledOutcome { step, code } => {
-            format!("unhandled outcome: {step} exited {code} with no matching Gate")
-        }
-        Fault::UnhandledExhaustion { step } => {
-            format!("unhandled exhaustion: {step} spent its Budget with no EXHAUSTED Gate")
-        }
-        Fault::DepthOverflow { workflow } => {
-            format!("depth overflow: entering {workflow} would exceed the max Depth")
-        }
     }
 }
 
@@ -261,12 +164,12 @@ fn main() {
     // directory to the file Sink. The Kernel stays unaware of Run identity
     // (ADR-0009).
     let log_override = cli.log_dir.or_else(|| env_var("AGENT_ORCHESTRATOR_LOG_DIR"));
-    let runs_dir = config::runs_dir(
+    let runs_dir = sinks::runs_dir(
         log_override.as_deref(),
         env_var("XDG_STATE_HOME").as_deref(),
         env_var("HOME").as_deref(),
     );
-    let keep = config::resolve_keep(
+    let keep = sinks::resolve_keep(
         cli.keep.as_deref(),
         env_var("AGENT_ORCHESTRATOR_KEEP").as_deref(),
     );
@@ -278,7 +181,7 @@ fn main() {
     // under the OS temp root, sharing this Run's id with the durable log dir but
     // with an independent (OS-reaped) lifecycle (ADR-0010). Created best-effort
     // before the first Step runs; a Run whose scratch cannot be made still runs.
-    let run_dir = config::run_scratch_dir(&std::env::temp_dir(), &run_id.to_string());
+    let run_dir = sinks::run_scratch_dir(&std::env::temp_dir(), &run_id.to_string());
     if let Err(e) = std::fs::create_dir_all(&run_dir) {
         eprintln!("warning: cannot create run directory at {}: {e}", run_dir.display());
     }
@@ -291,13 +194,13 @@ fn main() {
         ("RUN_DIR".to_string(), run_dir.clone()),
     ];
 
-    let mut sinks: Vec<Box<dyn Sink>> = vec![Box::new(ConsoleSink { quiet: cli.quiet })];
-    match file_sink::FileSink::create(log_dir.clone()) {
+    let mut sink_chain: Vec<Box<dyn Sink>> = vec![Box::new(ConsoleSink::new(cli.quiet))];
+    match FileSink::create(log_dir.clone()) {
         Ok(file) => {
             // Record the populated Step environment once at startup, so the
             // ephemeral Run Directory is discoverable from the durable log.
             file.record_environment(&environment);
-            sinks.push(Box::new(file));
+            sink_chain.push(Box::new(file));
         }
         // A Run that cannot be logged still runs; only durability is lost.
         Err(e) => eprintln!("warning: cannot open run log at {}: {e}", log_dir.display()),
@@ -305,12 +208,12 @@ fn main() {
 
     // Prune once this Run's directory exists, so the newest (this) Run counts
     // toward the kept N and the oldest are dropped first.
-    let _ = retention::prune(&runs_dir, keep);
+    let _ = sinks::prune(&runs_dir, keep);
 
-    let mut sink = tee::Tee::new(sinks);
+    let mut sink = Tee::new(sink_chain);
     let mut executor = SubprocessExecutor::with_env(environment);
 
-    let max_depth = config::resolve_max_depth(
+    let max_depth = sinks::resolve_max_depth(
         cli.max_depth.as_deref(),
         env_var("AGENT_ORCHESTRATOR_MAX_DEPTH").as_deref(),
     );
@@ -342,7 +245,7 @@ fn env_var(name: &str) -> Option<String> {
 // in the format-agnostic Kernel.
 #[cfg(test)]
 mod tests {
-    use super::{dim_prefixed, resolve_initial_message, Cli};
+    use super::{resolve_initial_message, Cli};
     use kernel::{GateKey, GateTarget, Registry, Step, StepBody, Workflow};
 
     fn args(items: &[&str]) -> Vec<String> {
@@ -397,13 +300,6 @@ mod tests {
         assert!(cli.quiet);
         assert_eq!(cli.log_dir.as_deref(), Some("/tmp/runs"));
         assert_eq!(cli.keep.as_deref(), Some("5"));
-    }
-
-    #[test]
-    fn dim_prefixed_tags_each_line_with_the_step() {
-        let rendered = dim_prefixed("build", b"first\nsecond\n");
-        assert!(rendered.contains("build ▏ first"));
-        assert!(rendered.contains("build ▏ second"));
     }
 
     #[test]
