@@ -15,8 +15,8 @@ A Workflow is a `.yaml` template — a directed graph of Steps the engine execut
 Run it with the installed binary:
 
 ```sh
-automedon <workflow.yaml> --message "<text>"
-echo '<text>' | automedon <workflow.yaml>   # Message piped on stdin
+automedon run <workflow.yaml> --message "<text>"
+echo '<text>' | automedon run <workflow.yaml>   # Message piped on stdin
 ```
 
 - **Working directory.** The engine runs each Step in the current directory and

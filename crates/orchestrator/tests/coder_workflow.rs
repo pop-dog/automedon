@@ -44,6 +44,7 @@ fn run_coder_logging_to(log_dir: &Path, extra_env: &[(&str, &str)]) -> i32 {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_automedon"));
     cmd.current_dir(repo_root)
         .env("CODER_STUB", "1")
+        .arg("run")
         .arg("--log-dir")
         .arg(log_dir);
     for (key, value) in extra_env {
