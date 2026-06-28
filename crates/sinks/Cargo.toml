@@ -1,0 +1,18 @@
+[package]
+name = "sinks"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Sinks are Modules: they depend on the Kernel's Observer interface (the `Sink`
+# trait), never the reverse (ADR-0003). The only path dependency is `kernel`;
+# serde/serde_json serialise the durable JSONL log format.
+[dependencies]
+kernel = { path = "../kernel" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+
+# UUIDv7 names the throwaway run directories the unit tests create; it is a test
+# fixture only, so it stays a dev-dependency rather than leaking into the crate.
+[dev-dependencies]
+uuid = { version = "1.23.3", features = ["v7"] }
