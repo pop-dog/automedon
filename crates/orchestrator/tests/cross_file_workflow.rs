@@ -40,6 +40,7 @@ impl Drop for TempDir {
 fn run_root(root: &Path, extra_args: &[&str]) -> i32 {
     let log_dir = TempDir::new("log");
     let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
+        .arg("run")
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")

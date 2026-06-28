@@ -101,7 +101,7 @@ Budget), then takes the `EXHAUSTED` Gate to `EXIT 42`, proving the engine is
 total:
 
 ```sh
-cargo run -p orchestrator -- examples/loop.yaml ; echo "exit=$?"
+cargo run -p orchestrator -- run examples/loop.yaml ; echo "exit=$?"
 ```
 
 ## Usage
@@ -110,7 +110,7 @@ Point the `orchestrator` binary at a Workflow YAML file and, optionally, seed th
 entry Step with an initial Message:
 
 ```sh
-cargo run -p orchestrator -- <workflow.yaml> --message "<text>"
+cargo run -p orchestrator -- run <workflow.yaml> --message "<text>"
 ```
 
 The flagship example, [`examples/coder.yaml`](examples/coder.yaml), is an
@@ -124,7 +124,7 @@ human and the review findings in the Run's scratch directory (`$RUN_DIR`, printe
 on a failed Run — see "Step environment"). Run it from the repo root:
 
 ```sh
-cargo run -p orchestrator -- examples/coder.yaml --message ./TASK.md
+cargo run -p orchestrator -- run examples/coder.yaml --message ./TASK.md
 ```
 
 Each LLM Step runs its agent unattended, since a Workflow Step is

@@ -50,7 +50,7 @@ the repo the coder reads, edits, and commits.
    ```
 4. **Run the coder:**
    ```sh
-   automedon examples/coder.yaml --message .workflows/<slug>/TASK.md
+   automedon run examples/coder.yaml --message .workflows/<slug>/TASK.md
    ```
 5. **Read the outcome** from the trace's final line `◆ RUN ended -> exit <code>`
    (not a shell/`tee` exit code):

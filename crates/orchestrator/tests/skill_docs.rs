@@ -21,14 +21,14 @@ fn skills_invoke_the_renamed_binary() {
     // invocation. Both must call the installed command, which is now `automedon`.
     let autocoder = skill("autocoder");
     assert!(
-        autocoder.contains("automedon examples/coder.yaml"),
-        "autocoder must run the coder Workflow with `automedon`"
+        autocoder.contains("automedon run examples/coder.yaml"),
+        "autocoder must run the coder Workflow with `automedon run`"
     );
 
     let engine = skill("automedon");
     assert!(
-        engine.contains("automedon <workflow.yaml>"),
-        "automedon must show the `automedon` invocation"
+        engine.contains("automedon run <workflow.yaml>"),
+        "automedon must show the `automedon run` invocation"
     );
 
     // The removed command name must not survive as a runnable invocation;

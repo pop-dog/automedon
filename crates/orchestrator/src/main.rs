@@ -1,5 +1,5 @@
 //! Driver: wires a YAML WorkflowSource and a console Sink into the Kernel.
-//! Usage: `orchestrator <workflow.yaml> [--message <text>]`.
+//! Usage: `automedon run <workflow.yaml> [--message <text>]`.
 //!
 //! The initial Message seeds the entry Step. It comes from `--message` or piped
 //! stdin (the flag wins); with no `--message` and nothing piped, it is empty.
@@ -154,9 +154,21 @@ struct Cli {
 struct UsageError;
 
 impl Cli {
-    /// Parse an argument vector (argv minus the program name). Defined over a
-    /// `&[String]` with no argv/stdin access of its own so it is unit-testable.
+    /// Parse an argument vector (argv minus the program name). The first token
+    /// selects the subcommand; only `run` exists today, and a missing or unknown
+    /// subcommand is a usage error. Defined over a `&[String]` with no argv/stdin
+    /// access of its own so it is unit-testable.
     fn parse(args: &[String]) -> Result<Cli, UsageError> {
+        match args.split_first() {
+            Some((cmd, rest)) if cmd == "run" => Cli::parse_run(rest),
+            _ => Err(UsageError),
+        }
+    }
+
+    /// Parse the arguments that follow the `run` subcommand: the workflow path
+    /// plus its flags. This is the pre-subcommand invocation surface, shifted one
+    /// token right.
+    fn parse_run(args: &[String]) -> Result<Cli, UsageError> {
         let mut path: Option<PathBuf> = None;
         let mut message = None;
         let mut quiet = false;
@@ -210,10 +222,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     let cli = Cli::parse(&args).unwrap_or_else(|UsageError| {
-        eprintln!(
-            "usage: orchestrator <workflow.yaml> [--message <text>] \
-             [-q|--quiet] [--log-dir <dir>] [--keep <n>] [--max-depth <n>]"
-        );
+        eprintln!("usage: automedon run <workflow.yaml> [--message <text>]");
         std::process::exit(2);
     });
     let path = cli.path;
@@ -341,19 +350,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_takes_the_first_positional_as_the_path() {
-        let cli = Cli::parse(&args(&["wf.yaml"])).unwrap();
+    fn parse_takes_the_first_positional_after_run_as_the_path() {
+        let cli = Cli::parse(&args(&["run", "wf.yaml"])).unwrap();
         assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
     }
 
     #[test]
+    fn parse_rejects_a_missing_subcommand() {
+        assert_eq!(Cli::parse(&args(&[])), Err(super::UsageError));
+    }
+
+    #[test]
+    fn parse_rejects_an_unknown_subcommand() {
+        // The workflow path is no longer accepted as the bare first argument; it
+        // reads as an unknown subcommand.
+        assert_eq!(Cli::parse(&args(&["wf.yaml"])), Err(super::UsageError));
+    }
+
+    #[test]
     fn parse_without_a_positional_is_a_usage_error() {
-        assert_eq!(Cli::parse(&args(&["-q", "--keep", "5"])), Err(super::UsageError));
+        assert_eq!(Cli::parse(&args(&["run", "-q", "--keep", "5"])), Err(super::UsageError));
     }
 
     #[test]
     fn parse_captures_flags_after_the_positional() {
-        let cli = Cli::parse(&args(&["wf.yaml", "--message", "hello"])).unwrap();
+        let cli = Cli::parse(&args(&["run", "wf.yaml", "--message", "hello"])).unwrap();
         assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
         assert_eq!(cli.message.as_deref(), Some("hello"));
     }
@@ -362,14 +383,16 @@ mod tests {
     fn parse_treats_a_dangling_message_as_absent() {
         // A trailing `--message` with no value falls back to stdin or the empty
         // default rather than erroring.
-        let cli = Cli::parse(&args(&["wf.yaml", "--message"])).unwrap();
+        let cli = Cli::parse(&args(&["run", "wf.yaml", "--message"])).unwrap();
         assert_eq!(cli.message, None);
     }
 
     #[test]
     fn parse_captures_flags_before_the_positional() {
-        let cli =
-            Cli::parse(&args(&["-q", "--log-dir", "/tmp/runs", "--keep", "5", "wf.yaml"])).unwrap();
+        let cli = Cli::parse(&args(&[
+            "run", "-q", "--log-dir", "/tmp/runs", "--keep", "5", "wf.yaml",
+        ]))
+        .unwrap();
         assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
         assert!(cli.quiet);
         assert_eq!(cli.log_dir.as_deref(), Some("/tmp/runs"));

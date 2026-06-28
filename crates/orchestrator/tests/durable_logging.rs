@@ -55,6 +55,7 @@ workflows:
     std::fs::write(&wf_path, wf).unwrap();
 
     let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
+        .arg("run")
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")
@@ -106,6 +107,7 @@ workflows:
     std::fs::write(&wf_path, wf).unwrap();
 
     let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
+        .arg("run")
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")
@@ -157,6 +159,7 @@ workflows:
     std::fs::write(&wf_path, wf).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_automedon"))
+        .arg("run")
         .arg("--log-dir")
         .arg(&log_dir.0)
         .arg("--quiet")
@@ -210,6 +213,7 @@ workflows:
     let keep = 2;
     for _ in 0..5 {
         let status = Command::new(env!("CARGO_BIN_EXE_automedon"))
+            .arg("run")
             .arg("--log-dir")
             .arg(&log_dir.0)
             .arg("--keep")

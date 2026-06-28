@@ -30,9 +30,9 @@ Run from the directory the Workflow should operate on — its working directory,
 e.g. the repo a Step reads, edits, and commits:
 
 ```sh
-automedon <workflow.yaml> --message "<text>"
+automedon run <workflow.yaml> --message "<text>"
 # or pipe the Message on stdin:
-echo '<text>' | automedon <workflow.yaml>
+echo '<text>' | automedon run <workflow.yaml>
 ```
 
 `--message` is the entry Step's input (the Workflow's argument); the flag wins
