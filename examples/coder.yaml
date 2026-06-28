@@ -3,15 +3,15 @@
 # TASK.md file; each Step re-emits that path on stdout so it propagates to its
 # successor. Only the small path rides the Message channel — the edits live in the
 # working directory; orchestration scratch (the review findings, the build/test
-# failure) lives in the ephemeral Run Directory ($RUN_DIR).
+# failure) lives in the ephemeral Run Directory ($AUTOMEDON_RUN_DIR).
 #
 #   Run (cwd = the repo to work on):
 #     orchestrator /path/to/examples/coder.yaml --message ./TASK.md
 #
-# Each Step names its script via $WORKFLOW_DIR — the directory of this file, set
+# Each Step names its script via $AUTOMEDON_WORKFLOW_DIR — the directory of this file, set
 # by the orchestrator — so the scripts are found no matter the cwd. The Steps read
 # TASK.md from the cwd (the repo being worked on) and edit it there, but write
-# orchestration scratch (FINDINGS.md, BUILD_FAILURE.md) into $RUN_DIR — the
+# orchestration scratch (FINDINGS.md, BUILD_FAILURE.md) into $AUTOMEDON_RUN_DIR — the
 # ephemeral per-Run directory the engine provides — so the repo stays a pure
 # deliverable. They also expect `claude`, and (for the build check) `cargo`, on
 # PATH.
@@ -54,7 +54,7 @@ workflows:
         # Writes a commit message from `git diff` + TASK.md and commits on the
         # current branch. Never pushes. The diff it commits is the exact tree the
         # `code` Step already built and tested, so it does not re-verify.
-        command: "$WORKFLOW_DIR/coder/commit.sh"
+        command: "$AUTOMEDON_WORKFLOW_DIR/coder/commit.sh"
         budget: 1
         gates:
           - key: 0
@@ -76,7 +76,7 @@ workflows:
         # once the agent finishes and non-zero only if the agent itself failed.
         # The single re-entry point of the loop: both a red build and a Blocking
         # review route back here, sharing this Budget.
-        command: "$WORKFLOW_DIR/coder/code.sh"
+        command: "$AUTOMEDON_WORKFLOW_DIR/coder/code.sh"
         budget: 3
         gates:
           - key: 0
@@ -92,9 +92,9 @@ workflows:
       build-test:
         # Deterministic, LLM-free checkpoint: build the project and run all tests.
         # Green hands off to review; red loops back to code with the failure in
-        # $RUN_DIR/BUILD_FAILURE.md. The loop is bounded by code's Budget (its re-entry),
+        # $AUTOMEDON_RUN_DIR/BUILD_FAILURE.md. The loop is bounded by code's Budget (its re-entry),
         # so this Step needs no Exhaustion handling of its own.
-        command: "$WORKFLOW_DIR/coder/build-test.sh"
+        command: "$AUTOMEDON_WORKFLOW_DIR/coder/build-test.sh"
         gates:
           - key: 0
             target: { step: review }
@@ -108,7 +108,7 @@ workflows:
         # file, categorised Blocking vs Suggestion, and re-emits the TASK.md path.
         # On approval it traverses the sub-Workflow's Exit Gate, surfacing exit 0
         # to the parent `develop` Step, which routes on to commit.
-        command: "$WORKFLOW_DIR/coder/review.sh"
+        command: "$AUTOMEDON_WORKFLOW_DIR/coder/review.sh"
         gates:
           - key: 0
             target: { exit: 0 }

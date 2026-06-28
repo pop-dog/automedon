@@ -12,7 +12,7 @@ exit codes, logs); activate that skill for anything about running the binary or
 reading a Run.
 
 **This skill is repo-only.** It requires a checkout: it runs
-`examples/coder.yaml`, whose Steps read repo files via `$WORKFLOW_DIR`. There is
+`examples/coder.yaml`, whose Steps read repo files via `$AUTOMEDON_WORKFLOW_DIR`. There is
 no remote installer for it — it is an example/template for coding the Automedon
 project itself. (The engine `automedon` skill does have a remote installer.)
 
@@ -60,7 +60,7 @@ the repo the coder reads, edits, and commits.
 
 ### Diagnosing an EXIT 90
 
-- The orchestrator prints the Run's ephemeral scratch directory (`$RUN_DIR`) to
+- The orchestrator prints the Run's ephemeral scratch directory (`$AUTOMEDON_RUN_DIR`) to
   stderr on a failed Run. The coder leaves `FINDINGS.md` (review findings) and
   `BUILD_FAILURE.md` (build/test output) there — read them while refining the
   `TASK.md`.

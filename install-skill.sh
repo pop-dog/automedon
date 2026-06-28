@@ -6,7 +6,7 @@
 # Installs the bundled `automedon` skill into your Claude skills directory without
 # cloning the repo. No Rust toolchain is needed. The binary installer is
 # install.sh; the in-repo `autocoder` skill is repo-only (it reads repo files via
-# $WORKFLOW_DIR) and has no remote installer.
+# $AUTOMEDON_WORKFLOW_DIR) and has no remote installer.
 #
 # A whole-repo source archive is downloaded rather than individual files so new
 # skill files are picked up without editing this installer.
