@@ -29,23 +29,27 @@ fn release_workflow_triggers_on_version_tags() {
 }
 
 #[test]
-fn release_workflow_builds_the_four_targets() {
+fn release_workflow_builds_the_supported_targets() {
     let body = read_workflow();
+    // macOS ships Apple Silicon only; there is no Intel (x86_64) Darwin build.
     for triple in [
         "x86_64-unknown-linux-gnu",
         "aarch64-unknown-linux-gnu",
-        "x86_64-apple-darwin",
         "aarch64-apple-darwin",
     ] {
         assert!(body.contains(triple), "missing build target {triple}");
     }
+    assert!(
+        !body.contains("x86_64-apple-darwin"),
+        "Intel macOS is intentionally unsupported"
+    );
 }
 
 #[test]
 fn release_workflow_attaches_the_installer_assets() {
     let body = read_workflow();
     // The os-arch labels the installer derives from `uname`.
-    for label in ["linux-x86_64", "linux-aarch64", "darwin-x86_64", "darwin-aarch64"] {
+    for label in ["linux-x86_64", "linux-aarch64", "darwin-aarch64"] {
         assert!(
             body.contains(label),
             "missing release asset for {label}"
