@@ -56,15 +56,60 @@ struct Cli {
 #[derive(Debug, PartialEq)]
 struct UsageError;
 
+/// Top-level usage: names the program, shows the command grammar, and lists the
+/// available subcommands so the CLI is self-describing. Printed to stdout for an
+/// explicit `help`, or to stderr for a missing/unknown subcommand.
+const TOP_USAGE: &str = "\
+automedon — run an agent Workflow
+
+usage: automedon <command> [args]
+
+commands:
+  run     Run a Workflow from a YAML file
+  help    Show this help
+
+Run `automedon <command> --help` for command-specific usage.";
+
+/// Usage for the `run` subcommand alone. Printed for `run --help` (stdout) or a
+/// `run` invocation missing its Workflow path (stderr).
+const RUN_USAGE: &str = "usage: automedon run <workflow.yaml> [--message <text>]";
+
+/// The outcome of parsing argv: run a Workflow, show requested help (a success,
+/// exit 0), or a usage error (exit non-zero). Help and usage errors carry the
+/// text to print so each context can point at the most specific usage, while the
+/// stream and exit code are decided by which variant it is — not by the parser.
+#[derive(Debug, PartialEq)]
+enum Invocation {
+    Run(Box<Cli>),
+    Help(&'static str),
+    Usage(&'static str),
+}
+
 impl Cli {
     /// Parse an argument vector (argv minus the program name). The first token
-    /// selects the subcommand; only `run` exists today, and a missing or unknown
-    /// subcommand is a usage error. Defined over a `&[String]` with no argv/stdin
-    /// access of its own so it is unit-testable.
-    fn parse(args: &[String]) -> Result<Cli, UsageError> {
+    /// selects the subcommand; `run` executes a Workflow and `help` (or a
+    /// top-level `--help`/`-h`) prints usage. A missing or unknown subcommand is
+    /// a usage error. Defined over a `&[String]` with no argv/stdin access of its
+    /// own so it is unit-testable.
+    fn parse(args: &[String]) -> Invocation {
         match args.split_first() {
-            Some((cmd, rest)) if cmd == "run" => Cli::parse_run(rest),
-            _ => Err(UsageError),
+            Some((cmd, rest)) if cmd == "run" => {
+                // A help flag anywhere in the run arguments asks for run's usage,
+                // taking precedence over parsing a (possibly absent) Workflow path.
+                if rest.iter().any(|a| a == "--help" || a == "-h") {
+                    return Invocation::Help(RUN_USAGE);
+                }
+                match Cli::parse_run(rest) {
+                    Ok(cli) => Invocation::Run(Box::new(cli)),
+                    Err(UsageError) => Invocation::Usage(RUN_USAGE),
+                }
+            }
+            Some((cmd, _)) if cmd == "help" || cmd == "--help" || cmd == "-h" => {
+                Invocation::Help(TOP_USAGE)
+            }
+            // No arguments or an unknown subcommand: point the operator at the
+            // fuller top-level usage on stderr.
+            _ => Invocation::Usage(TOP_USAGE),
         }
     }
 
@@ -124,10 +169,19 @@ impl Cli {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    let cli = Cli::parse(&args).unwrap_or_else(|UsageError| {
-        eprintln!("usage: automedon run <workflow.yaml> [--message <text>]");
-        std::process::exit(2);
-    });
+    let cli = match Cli::parse(&args) {
+        Invocation::Run(cli) => *cli,
+        // Explicit help is a success: usage to stdout, exit 0.
+        Invocation::Help(usage) => {
+            println!("{usage}");
+            std::process::exit(0);
+        }
+        // A usage error: usage to stderr, non-zero exit.
+        Invocation::Usage(usage) => {
+            eprintln!("{usage}");
+            std::process::exit(2);
+        }
+    };
     let path = cli.path;
 
     // The workflow definition's directory becomes $AUTOMEDON_WORKFLOW_DIR (a Step
@@ -245,39 +299,65 @@ fn env_var(name: &str) -> Option<String> {
 // in the format-agnostic Kernel.
 #[cfg(test)]
 mod tests {
-    use super::{resolve_initial_message, Cli};
+    use super::{resolve_initial_message, Cli, Invocation};
     use kernel::{GateKey, GateTarget, Registry, Step, StepBody, Workflow};
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
     }
 
+    /// Unwrap a `Run` invocation, panicking on `Help`/`Usage`. Keeps the
+    /// run-parsing tests reading about the parsed `Cli`, not the enum wrapper.
+    fn run(items: &[&str]) -> Cli {
+        match Cli::parse(&args(items)) {
+            Invocation::Run(cli) => *cli,
+            other => panic!("expected a run invocation, got {other:?}"),
+        }
+    }
+
     #[test]
     fn parse_takes_the_first_positional_after_run_as_the_path() {
-        let cli = Cli::parse(&args(&["run", "wf.yaml"])).unwrap();
+        let cli = run(&["run", "wf.yaml"]);
         assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
     }
 
     #[test]
     fn parse_rejects_a_missing_subcommand() {
-        assert_eq!(Cli::parse(&args(&[])), Err(super::UsageError));
+        assert_eq!(Cli::parse(&args(&[])), Invocation::Usage(super::TOP_USAGE));
     }
 
     #[test]
     fn parse_rejects_an_unknown_subcommand() {
         // The workflow path is no longer accepted as the bare first argument; it
         // reads as an unknown subcommand.
-        assert_eq!(Cli::parse(&args(&["wf.yaml"])), Err(super::UsageError));
+        assert_eq!(Cli::parse(&args(&["wf.yaml"])), Invocation::Usage(super::TOP_USAGE));
     }
 
     #[test]
     fn parse_without_a_positional_is_a_usage_error() {
-        assert_eq!(Cli::parse(&args(&["run", "-q", "--keep", "5"])), Err(super::UsageError));
+        assert_eq!(
+            Cli::parse(&args(&["run", "-q", "--keep", "5"])),
+            Invocation::Usage(super::RUN_USAGE),
+        );
+    }
+
+    #[test]
+    fn parse_top_level_help_flags_request_top_usage() {
+        for flag in ["help", "--help", "-h"] {
+            assert_eq!(Cli::parse(&args(&[flag])), Invocation::Help(super::TOP_USAGE));
+        }
+    }
+
+    #[test]
+    fn parse_run_help_flags_request_run_usage() {
+        for flag in ["--help", "-h"] {
+            assert_eq!(Cli::parse(&args(&["run", flag])), Invocation::Help(super::RUN_USAGE));
+        }
     }
 
     #[test]
     fn parse_captures_flags_after_the_positional() {
-        let cli = Cli::parse(&args(&["run", "wf.yaml", "--message", "hello"])).unwrap();
+        let cli = run(&["run", "wf.yaml", "--message", "hello"]);
         assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
         assert_eq!(cli.message.as_deref(), Some("hello"));
     }
@@ -286,16 +366,13 @@ mod tests {
     fn parse_treats_a_dangling_message_as_absent() {
         // A trailing `--message` with no value falls back to stdin or the empty
         // default rather than erroring.
-        let cli = Cli::parse(&args(&["run", "wf.yaml", "--message"])).unwrap();
+        let cli = run(&["run", "wf.yaml", "--message"]);
         assert_eq!(cli.message, None);
     }
 
     #[test]
     fn parse_captures_flags_before_the_positional() {
-        let cli = Cli::parse(&args(&[
-            "run", "-q", "--log-dir", "/tmp/runs", "--keep", "5", "wf.yaml",
-        ]))
-        .unwrap();
+        let cli = run(&["run", "-q", "--log-dir", "/tmp/runs", "--keep", "5", "wf.yaml"]);
         assert_eq!(cli.path, std::path::PathBuf::from("wf.yaml"));
         assert!(cli.quiet);
         assert_eq!(cli.log_dir.as_deref(), Some("/tmp/runs"));
