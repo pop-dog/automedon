@@ -62,6 +62,12 @@ case "$arch" in
     *) die "unsupported architecture: $arch (need x86_64 or aarch64)" ;;
 esac
 
+# macOS prebuilt binaries are Apple Silicon only; there is no Intel (x86_64)
+# Darwin release asset. Fail with a clear message rather than a 404 on download.
+if [ "$os" = "darwin" ] && [ "$arch" = "x86_64" ]; then
+    die "Intel macOS is not supported by the prebuilt binaries (Apple Silicon only); build from source: cargo install --path crates/orchestrator"
+fi
+
 # --- Downloader (curl, falling back to wget) ---------------------------------
 
 if command -v curl >/dev/null 2>&1; then
