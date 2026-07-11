@@ -67,7 +67,15 @@ jobs:
 
       - name: Package archive
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          # Tag pushes name the archive after the release version (vX.Y.Z ->
+          # X.Y.Z). A manual workflow_dispatch has no tag, and a branch name may
+          # contain a slash that is invalid in the archive path, so fall back to
+          # the short commit SHA for those build-only runs.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${GITHUB_SHA:0:7}"
+          fi
           archive="automedon-${version}-${{ matrix.label }}.tar.gz"
           tar -czf "$archive" -C "target/${{ matrix.target }}/release" automedon
           echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
