@@ -1,4 +1,5 @@
-//! The Kernel — the Workflow engine and *only* the engine (ADR-0003 microkernel).
+//! The Kernel — the Workflow engine and *only* the engine (microkernel; see
+//! docs/microkernel-boundary.md).
 //! It invokes Steps, routes Gates, manages the Frame/Budget, raises Faults, and
 //! emits Events. It is LLM- and data-agnostic. Modules (e.g. Sinks) live outside
 //! and depend on the Kernel, never the reverse.
@@ -40,7 +41,7 @@ pub trait Sink {
     /// Receive one control-plane transition.
     fn emit(&mut self, event: &Event);
 
-    /// Receive a chunk of a Step's bulk output (ADR-0009). Bytes arrive as the
+    /// Receive a chunk of a Step's bulk output. Bytes arrive as the
     /// Step produces them, bracketed between its `StepEntered` and `StepExited`
     /// Events; `activation` disambiguates repeated runs of the Step under its
     /// Budget. Defaults to a no-op so control-only Sinks need not implement it.
@@ -53,7 +54,7 @@ pub trait Sink {
 /// owns the IR types; this trait abstracts the source. YAML is the first impl
 /// (in `orchestrator`); JSON or a code-builder could be added without touching
 /// the Kernel. How references resolve to ids — within one file now, across files
-/// later — is entirely a source concern (ADR-0008).
+/// later — is entirely a source concern.
 pub trait WorkflowSource {
     fn load(&self) -> Result<Registry, Box<dyn std::error::Error>>;
 }

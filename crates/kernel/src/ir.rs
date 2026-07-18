@@ -7,12 +7,12 @@ use std::collections::HashMap;
 use serde::{de, Deserialize, Deserializer, Serialize};
 
 /// Identifies a Workflow within a [`Registry`]. A Composite Step names its child
-/// by this id; it is the `workflows:` map key, never a path (ADR-0008).
+/// by this id; it is the `workflows:` map key, never a path.
 pub type WorkflowId = String;
 
 /// The set of Workflows a Run can reach, plus the id of the root. The Kernel runs
 /// against a registry rather than a single Workflow so a Composite Step can name
-/// a child by id (ADR-0008); whether ids were assembled from one file or many is
+/// a child by id; whether ids were assembled from one file or many is
 /// a [`crate::WorkflowSource`] concern the engine never sees.
 #[derive(Debug, Deserialize)]
 pub struct Registry {
@@ -48,7 +48,7 @@ pub struct Step {
 /// What a Step does. A leaf `Command` runs via the executor; a `Workflow`
 /// (Composite) runs the named child sub-Workflow to its Exit Gate and surfaces
 /// its code. The two are mutually exclusive — illegal "two bodies" states are
-/// unrepresentable (ADR-0008).
+/// unrepresentable.
 #[derive(Debug, Clone)]
 pub enum StepBody {
     /// Run a command via `sh -c` with the working directory inherited.

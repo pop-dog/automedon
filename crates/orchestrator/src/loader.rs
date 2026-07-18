@@ -1,5 +1,5 @@
 //! The path-based `WorkflowSource`: given a root file, transitively load every
-//! referenced file and assemble a single kernel [`Registry`] (ADR-0008). The
+//! referenced file and assemble a single kernel [`Registry`]. The
 //! Kernel still addresses sub-Workflows by id; this loader canonicalizes paths to
 //! ids before the Kernel ever sees them, so `{ path: … }` never reaches the
 //! engine and the Kernel stays the one schema source of truth.

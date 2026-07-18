@@ -5,7 +5,8 @@ edition = "2021"
 publish = false
 
 # Sinks are Modules: they depend on the Kernel's Observer interface (the `Sink`
-# trait), never the reverse (ADR-0003). The only path dependency is `kernel`;
+# trait), never the reverse (see docs/microkernel-boundary.md). The only path
+# dependency is `kernel`;
 # serde/serde_json serialise the durable JSONL log format.
 [dependencies]
 kernel = { path = "../kernel" }

@@ -1,7 +1,7 @@
 //! The Step-execution seam. Routing (in `run`) decides *which* Gate to take; a
 //! [`StepExecutor`] decides *how* a Step actually runs. Splitting the two lets
 //! the routing core be tested with canned outcomes while the subprocess plumbing
-//! stays behind one adapter, and lets a future parallel executor (ADR-0004) be an
+//! stays behind one adapter, and lets a future parallel executor be an
 //! additive adapter rather than a Kernel change.
 
 use std::io::{Read, Write};
@@ -13,7 +13,7 @@ use std::thread;
 use crate::{RoutingContract, Sink, Stream};
 
 /// Runs one leaf Step's command and reports back its outcome. The whole Step ABI
-/// (ADR-0003 — "a Step is any process that exits with an integer") lives behind
+/// ("a Step is any process that exits with an integer") lives behind
 /// this single method; `run` never spawns a process itself. Only leaf
 /// (`StepBody::Command`) Steps reach an executor — Composite Steps are run by the
 /// engine's Frame stack, never here — so the seam takes the command, not the Step.
@@ -38,7 +38,7 @@ pub trait StepExecutor {
 /// The production [`StepExecutor`]: each Step is an `sh -c` subprocess with the
 /// working directory inherited. Carries the Step environment — the ambient,
 /// Run-constant context (`$AUTOMEDON_WORKFLOW_DIR`, `$AUTOMEDON_RUN_DIR`) the engine provides — and
-/// layers it onto every spawn's inherited env (ADR-0010). Constant for the Run.
+/// layers it onto every spawn's inherited env. Constant for the Run.
 #[derive(Default)]
 pub struct SubprocessExecutor {
     /// Name/path pairs injected into each child's environment per spawn,
@@ -54,7 +54,7 @@ impl SubprocessExecutor {
     }
 
     /// An Executor carrying the Step environment to inject into every spawned
-    /// Step, layered on the inherited env (ADR-0010).
+    /// Step, layered on the inherited env.
     pub fn with_env(env: Vec<(String, PathBuf)>) -> Self {
         Self { env }
     }
@@ -75,7 +75,7 @@ impl StepExecutor for SubprocessExecutor {
         contract: &RoutingContract,
         sink: &mut dyn Sink,
     ) -> (i32, Vec<u8>) {
-        // The routing contract is a per-Step member (ADR-0012): serialise it to
+        // The routing contract is a per-Step member: serialise it to
         // JSON here — the wire format is this adapter's private choice — and
         // layer it on alongside the Run-constant env members.
         let gates = serde_json::to_string(contract).expect("routing contract should serialise");

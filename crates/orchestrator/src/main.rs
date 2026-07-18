@@ -14,7 +14,7 @@ mod loader;
 
 /// A `WorkflowSource` that parses a Workflow registry from a root YAML file
 /// (`root:` + `workflows:`), transitively loading any files its Composite Steps
-/// reference by `{ path: … }` and assembling them into one registry (ADR-0008).
+/// reference by `{ path: … }` and assembling them into one registry.
 /// A single-file Workflow is just the degenerate case with no path references.
 struct YamlSource {
     path: PathBuf,
@@ -215,8 +215,7 @@ fn main() {
     let initial_message = resolve_initial_message(cli.message, piped_stdin);
 
     // Choose the runs directory, then mint this Run's UUIDv7 ID and hand its
-    // directory to the file Sink. The Kernel stays unaware of Run identity
-    // (ADR-0009).
+    // directory to the file Sink. The Kernel stays unaware of Run identity.
     let log_override = cli.log_dir.or_else(|| env_var("AGENT_ORCHESTRATOR_LOG_DIR"));
     let runs_dir = sinks::runs_dir(
         log_override.as_deref(),
@@ -233,15 +232,15 @@ fn main() {
 
     // The ephemeral Run Directory ($AUTOMEDON_RUN_DIR): per-Run scratch the engine provides
     // under the OS temp root, sharing this Run's id with the durable log dir but
-    // with an independent (OS-reaped) lifecycle (ADR-0010). Created best-effort
+    // with an independent (OS-reaped) lifecycle. Created best-effort
     // before the first Step runs; a Run whose scratch cannot be made still runs.
     let run_dir = sinks::run_scratch_dir(&std::env::temp_dir(), &run_id.to_string());
     if let Err(e) = std::fs::create_dir_all(&run_dir) {
         eprintln!("warning: cannot create run directory at {}: {e}", run_dir.display());
     }
 
-    // The Step environment: the ambient, Run-constant context every Step receives
-    // (ADR-0010). The Executor injects it per-spawn, retiring the previous global
+    // The Step environment: the ambient, Run-constant context every Step
+    // receives. The Executor injects it per-spawn, retiring the previous global
     // `set_var("AUTOMEDON_WORKFLOW_DIR")`. Logging whatever it holds covers future members.
     let environment: Vec<(String, PathBuf)> = vec![
         ("AUTOMEDON_WORKFLOW_DIR".to_string(), workflow_dir),

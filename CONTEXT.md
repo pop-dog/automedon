@@ -58,24 +58,24 @@ The Workflow engine and *only* the engine: it invokes Steps, reads exit codes, r
 _Avoid_: Engine, runtime, core, interpreter (acceptable informally), framework (the framework = Kernel + Modules).
 
 **Step Executor**:
-The seam between *deciding which Gate* (routing, in the run loop) and *actually running a Step's command*. The Kernel's routing core calls a `StepExecutor` to run one Step and report back its `(exit code, out-Message)`, streaming output to the Sink as it arrives; the production adapter runs the Step as a subprocess (`sh -c`). Isolating execution behind this trait lets the routing core (Budget cascade, Gate precedence, Exhaustion, Faults) be tested with canned outcomes — no shell, no I/O — and keeps the whole Step ABI ("a process that exits with an integer", ADR-0003) as one swappable adapter, leaving a future executor an additive change rather than a Kernel change.
+The seam between *deciding which Gate* (routing, in the run loop) and *actually running a Step's command*. The Kernel's routing core calls a `StepExecutor` to run one Step and report back its `(exit code, out-Message)`, streaming output to the Sink as it arrives; the production adapter runs the Step as a subprocess (`sh -c`). Isolating execution behind this trait lets the routing core (Budget cascade, Gate precedence, Exhaustion, Faults) be tested with canned outcomes — no shell, no I/O — and keeps the whole Step ABI ("a process that exits with an integer") as one swappable adapter, leaving a future executor an additive change rather than a Kernel change.
 _Avoid_: Runner, driver, invoker, spawner.
 
 **Orchestrator**:
 The composition root that assembles and runs a [[Run]] from the [[Kernel]] and
 its [[Module]]s — the home of everything the Kernel is deliberately ignorant of.
 It parses the Workflow file, constructs the [[Sink]]s, mints the Run's UUIDv7
-identity (ADR-0009), establishes the [[Step environment]] (ADR-0010), then runs
+identity, establishes the [[Step environment]], then runs
 the Kernel's routing loop. Realised as the `orchestrator` crate, which builds the
 `automedon` binary: the crate keeps the descriptive role name while the product
-and binary carry the brand (ADR-0011). The binary exposes its behaviour under a
+and binary carry the brand. The binary exposes its behaviour under a
 subcommand (`automedon run <workflow>`), leaving room to add sibling subcommands
 later without disturbing the engine. Distinct from the [[Kernel]] (which only
 routes) and a [[Module]] (an opt-in capability the orchestrator wires in).
 _Avoid_: Engine (that is the Kernel), driver, runner, main, app, host.
 
 **Module**:
-An opt-in layer built on top of the Kernel, never part of it — its defining property is that the Kernel never depends on it. A Module is wired to the Kernel by the orchestrator and runs inside the engine process; a [[Sink]] is the archetype, and observability and durability live here too. A Module may read kernel-opaque annotations (like a Gate's `when`) but the Kernel never reaches back. LLM interfacing is *not* a Module: it lives in a Step's own command, outside the engine entirely, reading the [[Routing contract]] the engine exposes (ADR-0012). The repo ships example helper scripts for it, but they are forkable user-space code, not a layer the engine wires in.
+An opt-in layer built on top of the Kernel, never part of it — its defining property is that the Kernel never depends on it. A Module is wired to the Kernel by the orchestrator and runs inside the engine process; a [[Sink]] is the archetype, and observability and durability live here too. A Module may read kernel-opaque annotations (like a Gate's `when`) but the Kernel never reaches back. LLM interfacing is *not* a Module: it lives in a Step's own command, outside the engine entirely, reading the [[Routing contract]] the engine exposes. The repo ships example helper scripts for it, but they are forkable user-space code, not a layer the engine wires in.
 _Avoid_: Plugin, extension, package.
 
 **Run**:
@@ -103,7 +103,7 @@ A framework-detected condition that prevents a Workflow from reaching an Exit Ga
 _Avoid_: Error, exception, crash, panic.
 
 **Event**:
-An immutable, never-mutated record of one Kernel transition (StepEntered, StepExited, GateTaken, FramePushed/Popped, MessagePassed, BudgetConsumed/Exhausted, FaultRaised/Caught, RunStarted/Ended). An Event records *what* transition happened, not *when*: timestamping and sequence-numbering are added by a persistence Sink, not intrinsic to an Event (ADR-0005). The Kernel emits Events as a *side output* of execution; routing runs on separate in-memory working state — so this is event *logging*, not event sourcing (nothing reads the stream back to drive execution). Single-token execution (ADR-0004) makes the stream a totally ordered linear sequence.
+An immutable, never-mutated record of one Kernel transition (StepEntered, StepExited, GateTaken, FramePushed/Popped, MessagePassed, BudgetConsumed/Exhausted, FaultRaised/Caught, RunStarted/Ended). An Event records *what* transition happened, not *when*: timestamping and sequence-numbering are added by a persistence Sink, not intrinsic to an Event. The Kernel emits Events as a *side output* of execution; routing runs on separate in-memory working state — so this is event *logging*, not event sourcing (nothing reads the stream back to drive execution). Single-token execution makes the stream a totally ordered linear sequence.
 _Avoid_: Log line, record, Message (a Message is data passed between Steps, not an execution record).
 
 **Sink**:
@@ -113,7 +113,7 @@ _Avoid_: Listener, handler, logger, observer (acceptable informally).
 ## Workspace
 
 **Workspace**:
-The filesystem context a Run operates in — the umbrella over the [[Repository]] and the [[Run Directory]]. It is where bulk artifacts live (the Steps' edits, the task text, review findings), referenced by the small values that ride the Message. The Workspace is *not* a Kernel concept: the Kernel is data- and IO-agnostic (ADR-0003), so the Workspace is a convention the driver and Steps share, not something the engine knows about.
+The filesystem context a Run operates in — the umbrella over the [[Repository]] and the [[Run Directory]]. It is where bulk artifacts live (the Steps' edits, the task text, review findings), referenced by the small values that ride the Message. The Workspace is *not* a Kernel concept: the Kernel is data- and IO-agnostic, so the Workspace is a convention the driver and Steps share, not something the engine knows about.
 _Avoid_: Sandbox, scratch (names only one region), Cargo workspace (an unrelated build concept).
 
 **Repository**:
@@ -125,9 +125,9 @@ The engine-provided, per-Run scratch directory — the second region of the [[Wo
 _Avoid_: Scratch dir (informal), temp dir, log dir (that is the separate durable run log).
 
 **Step environment**:
-The ambient, read-only context the [[Step Executor]] establishes for every Step before running it. Its *broadcast* members are constant across the whole Run and identical for every Step, so the engine broadcasts them rather than passing them Step-to-Step like a [[Message]] — a fourth channel alongside control (the exit code), data (the Message), and output (Step output to the [[Sink]]). These members are `$AUTOMEDON_WORKFLOW_DIR` (where the Workflow's scripts live) and `$AUTOMEDON_RUN_DIR` (the [[Run Directory]]). The subprocess Executor realises them as environment variables inherited by each `sh -c` child; the [[Kernel]] never sees them (ADR-0003) — it is the Executor adapter's concern, like Run identity is the orchestrator's (ADR-0009). Distinct from the per-Step [[Routing contract]], which the same Executor injects but which varies Step-to-Step (ADR-0012).
+The ambient, read-only context the [[Step Executor]] establishes for every Step before running it. Its *broadcast* members are constant across the whole Run and identical for every Step, so the engine broadcasts them rather than passing them Step-to-Step like a [[Message]] — a fourth channel alongside control (the exit code), data (the Message), and output (Step output to the [[Sink]]). These members are `$AUTOMEDON_WORKFLOW_DIR` (where the Workflow's scripts live) and `$AUTOMEDON_RUN_DIR` (the [[Run Directory]]). The subprocess Executor realises them as environment variables inherited by each `sh -c` child; the [[Kernel]] never sees them — it is the Executor adapter's concern, like Run identity is the orchestrator's. Distinct from the per-Step [[Routing contract]], which the same Executor injects but which varies Step-to-Step.
 _Avoid_: Env, globals, config, ambient state.
 
 **Routing contract**:
-The Executor-injected, *per-Step* description of how the Step's own exit code will be routed — its `Code` and `Default` [[Gate]]s as `{ key, when }` pairs (no targets, no `EXHAUSTED`/`FAULT`). A generic, [[Kernel]]-owned capability ("here is how your exit code routes"), *not* an LLM feature: the engine never learns what an LLM is. The subprocess Executor serialises it to `$AUTOMEDON_GATES` (JSON); its first consumer is an example LLM helper script a Step sources, which turns the contract into a prompt and parses the reply back into a key. Distinct from the broadcast [[Step environment]] in that it varies Step-to-Step (ADR-0012).
+The Executor-injected, *per-Step* description of how the Step's own exit code will be routed — its `Code` and `Default` [[Gate]]s as `{ key, when }` pairs (no targets, no `EXHAUSTED`/`FAULT`). A generic, [[Kernel]]-owned capability ("here is how your exit code routes"), *not* an LLM feature: the engine never learns what an LLM is. The subprocess Executor serialises it to `$AUTOMEDON_GATES` (JSON); its first consumer is an example LLM helper script a Step sources, which turns the contract into a prompt and parses the reply back into a key. Distinct from the broadcast [[Step environment]] in that it varies Step-to-Step.
 _Avoid_: Gate table dump, prompt spec, env (it is not part of the broadcast environment).

@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# The bin depends on the kernel and the Sink Modules, never the reverse
-# (ADR-0003). serde_yaml — the concrete Workflow format — lives HERE, not in the
-# kernel.
+# The bin depends on the kernel and the Sink Modules, never the reverse (see
+# docs/microkernel-boundary.md). serde_yaml — the concrete Workflow format —
+# lives HERE, not in the kernel.
 [dependencies]
 kernel = { path = "../kernel" }
 sinks = { path = "../sinks" }
