@@ -51,6 +51,87 @@ fn run_llm(gates: &str, stdin: &str, body: &str) -> (i32, String, String) {
     )
 }
 
+/// A throwaway template file under the system temp dir, removed on Drop.
+struct TempTemplate(PathBuf);
+
+impl TempTemplate {
+    fn new(tag: &str, content: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("ao-llm-{tag}-{}.md", uuid::Uuid::now_v7()));
+        std::fs::write(&path, content).expect("failed to write template");
+        TempTemplate(path)
+    }
+}
+
+impl Drop for TempTemplate {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[test]
+fn render_substitutes_a_single_pair() {
+    let tpl = TempTemplate::new("single", "Implement the task at {{TASK_FILE}} now.\n");
+    let body = format!("llm_render \"{}\" TASK_FILE=/work/TASK.md", tpl.0.display());
+    let (code, stdout, stderr) = run_llm(REVIEW_GATES, "", &body);
+    assert_eq!(code, 0, "render should succeed; stderr:\n{stderr}");
+    // Exact equality doubles as the stdout-hygiene check: nothing but the
+    // rendered prompt may appear on stdout.
+    assert_eq!(stdout, "Implement the task at /work/TASK.md now.\n");
+}
+
+#[test]
+fn render_substitutes_multiple_pairs() {
+    // Values may span lines (llm_prompt's menu fills {{DECISION_MENU}}) and a
+    // placeholder may legitimately expand to empty (a no-op {{REVISE}}).
+    let tpl = TempTemplate::new(
+        "multi",
+        "Review {{TASK_FILE}}. {{REVISE}}Choose:\n{{DECISION_MENU}}\n",
+    );
+    let body = format!(
+        "llm_render \"{}\" TASK_FILE=/work/TASK.md REVISE= 'DECISION_MENU=  DECISION: 0\n  DECISION: 1'",
+        tpl.0.display()
+    );
+    let (code, stdout, stderr) = run_llm(REVIEW_GATES, "", &body);
+    assert_eq!(code, 0, "render should succeed; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "Review /work/TASK.md. Choose:\n  DECISION: 0\n  DECISION: 1\n"
+    );
+}
+
+#[test]
+fn render_errors_on_an_unresolved_placeholder() {
+    // A placeholder no pair fills means the prompt would ship with literal
+    // `{{...}}` text; the render must refuse rather than emit a broken prompt.
+    let tpl = TempTemplate::new("unresolved", "Fix {{TASK_FILE}} and {{FINDINGS_FILE}}.\n");
+    let body = format!("llm_render \"{}\" TASK_FILE=/work/TASK.md", tpl.0.display());
+    let (code, stdout, stderr) = run_llm(REVIEW_GATES, "", &body);
+    assert_ne!(code, 0, "an unresolved placeholder must be a hard error");
+    assert_eq!(stdout, "", "no partial prompt may leak to stdout");
+    assert!(
+        stderr.contains("FINDINGS_FILE"),
+        "stderr should name the unresolved placeholder; got:\n{stderr}"
+    );
+}
+
+#[test]
+fn render_errors_on_an_unused_pair() {
+    // A pair matching no placeholder means the caller believes text it supplied
+    // reaches the prompt when it silently would not; the render must refuse.
+    let tpl = TempTemplate::new("unused", "Implement {{TASK_FILE}}.\n");
+    let body = format!(
+        "llm_render \"{}\" TASK_FILE=/work/TASK.md REVISE='fix it'",
+        tpl.0.display()
+    );
+    let (code, stdout, stderr) = run_llm(REVIEW_GATES, "", &body);
+    assert_ne!(code, 0, "an unused pair must be a hard error");
+    assert_eq!(stdout, "", "no prompt may leak to stdout");
+    assert!(
+        stderr.contains("REVISE"),
+        "stderr should name the unused pair; got:\n{stderr}"
+    );
+}
+
 #[test]
 fn parse_exits_with_the_chosen_code_key() {
     // A valid `DECISION: <key>` naming a Code gate exits with that integer, and
