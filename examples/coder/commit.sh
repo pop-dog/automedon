@@ -17,12 +17,20 @@ set -u
 # lives next to this script under prompts/.
 . "$AUTOMEDON_WORKFLOW_DIR/lib/llm.sh"
 
+# The forkable example repo-location helper: task_repo_cd puts this Step in
+# the repository that actually holds the task file, which may be a sibling
+# git worktree the orchestrator was not started in (see the autocoder
+# wrapper's checkout.sh).
+. "$AUTOMEDON_WORKFLOW_DIR/lib/repo.sh"
+
 task_path="$(cat)"
 
 if [ "${CODER_STUB:-}" = "1" ]; then
     printf '%s' "$task_path"
     exit 0
 fi
+
+task_repo_cd "$task_path" || exit 1
 
 prompt="$(llm_render "${0%/*}/prompts/commit.md" TASK_FILE="$task_path")" || exit 1
 

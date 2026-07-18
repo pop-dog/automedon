@@ -1,0 +1,96 @@
+# The autocoder wrapper: turn a GitHub issue reference into a published,
+# ready-for-review PR. The entry Message is an issue number or URL; the top
+# level is `setup -> coder -> create-pr`.
+#
+#   Run (cwd = the repo whose issues this drives):
+#     orchestrator /path/to/examples/autocoder.yaml --message 42
+#
+# `setup` is a Composite Step running the same-file `setup` sub-Workflow
+# (`distill -> checkout`): `distill` reads the issue and stages a TASK.md in
+# the ephemeral Run Directory, emitting the branch name it chose; `checkout`
+# is the only git-mutating Step — it creates a dedicated sibling worktree for
+# that branch and moves the staged TASK.md into it, emitting its
+# worktree-absolute path. `coder` is a cross-file Composite reusing
+# `coder.yaml` unchanged over that path — every coder Step `task_repo_cd`s
+# into the worktree the message names, so it edits, builds, and commits
+# there regardless of this Workflow's own cwd. `create-pr` then pushes the
+# branch and opens the PR.
+#
+# Every Step's `0` Gate advances to the next stage; every other Gate escalates
+# (`{ exit: 90 }`, the reserved "escalate to user" band) — a failure anywhere
+# leaves the worktree and its scratch in place for a human to diagnose, per
+# the wrapper's recovery story (re-running reuses the worktree).
+root: autocoder
+
+workflows:
+  autocoder:
+    entry: setup
+
+    steps:
+      setup:
+        workflow: setup
+        budget: 1
+        gates:
+          - key: 0
+            target: { step: coder }
+            when: the issue is distilled and a worktree is ready — start coding
+          - key: "*"
+            target: { exit: 90 }
+            when: distilling or checking out the issue failed — escalate
+
+      coder:
+        # Cross-file Composite: run the existing coder.yaml root Workflow
+        # unmodified over the worktree-absolute TASK.md path `setup` emitted.
+        workflow: { path: coder.yaml }
+        budget: 1
+        gates:
+          - key: 0
+            target: { step: create-pr }
+            when: the change is reviewed and committed — publish it
+          - key: "*"
+            target: { exit: 90 }
+            when: coder escalated (build failed or review did not converge) — escalate
+
+      create-pr:
+        command: "$AUTOMEDON_WORKFLOW_DIR/autocoder/create-pr.sh"
+        budget: 1
+        gates:
+          - key: 0
+            target: { exit: 0 }
+            when: the branch is pushed and the PR is open — done
+          - key: "*"
+            target: { exit: 90 }
+            when: pushing or opening the PR failed — escalate
+
+  setup:
+    entry: distill
+
+    steps:
+      distill:
+        # Agent Step: reads the GitHub issue, stages TASK.md in the ephemeral
+        # Run Directory, and emits the branch name it chose (or, on
+        # recovery, the branch name of a worktree already staged for this
+        # issue).
+        command: "$AUTOMEDON_WORKFLOW_DIR/autocoder/distill.sh"
+        budget: 1
+        gates:
+          - key: 0
+            target: { step: checkout }
+            when: the issue is distilled — prepare its worktree
+          - key: "*"
+            target: { exit: 90 }
+            when: reading the issue or writing TASK.md failed — escalate
+
+      checkout:
+        # Deterministic, LLM-free, the only git-mutating Step: creates the
+        # sibling worktree/branch (or reuses it on recovery) and moves the
+        # staged TASK.md in, emitting its worktree-absolute path.
+        command: "$AUTOMEDON_WORKFLOW_DIR/autocoder/checkout.sh"
+        budget: 1
+        gates:
+          - key: 0
+            target: { exit: 0 }
+            when: the worktree is ready — hand off to the coder
+          - key: "*"
+            target: { exit: 90 }
+            when: the worktree/branch state collided or could not be created — escalate

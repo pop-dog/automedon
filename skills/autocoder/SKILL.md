@@ -1,73 +1,71 @@
 ---
 name: autocoder
-description: Implement a coding task in the Automedon project by driving its bundled coder Workflow (code → review → commit) instead of editing the repo directly. You write a TASK.md; the Workflow's agents write the code. Use when asked to code or fix an issue in the Automedon project via Automedon.
+description: Turn a GitHub issue into a published, ready-for-review PR by driving the bundled autocoder Workflow (distill → checkout → code → review → commit → create-pr) instead of editing the repo directly. You give it an issue reference; the Workflow's agents do everything else. Use when asked to code or fix a GitHub issue in the Automedon project via Automedon.
 ---
 
-## Autocoder — code a task with the coder Workflow
+## Autocoder — issue in, published PR out
 
-Implement a task by running the bundled `code → review → commit` coder Workflow.
-You write a `TASK.md`; the Workflow's agents do the coding. This skill builds on
-the **`automedon`** skill (the engine mechanics — invocation, traces,
-exit codes, logs); activate that skill for anything about running the binary or
-reading a Run.
+Give this skill a GitHub issue and it runs the bundled `autocoder` Workflow:
+`setup (distill → checkout) → coder → create-pr`. `distill` reads the issue and
+writes a concrete `TASK.md`; `checkout` prepares a dedicated git worktree and
+branch for it; `coder` is the existing `code → review → commit` loop, unmodified,
+run over that worktree; `create-pr` pushes the branch and opens the PR. This
+skill builds on the **`automedon`** skill (the engine mechanics — invocation,
+traces, exit codes, logs); activate that skill for anything about running the
+binary or reading a Run.
 
 **This skill is repo-only.** It requires a checkout: it runs
-`examples/coder.yaml`, whose Steps read repo files via `$AUTOMEDON_WORKFLOW_DIR`. There is
-no remote installer for it — it is an example/template for coding the Automedon
-project itself. (The engine `automedon` skill does have a remote installer.)
+`examples/autocoder.yaml`, whose Steps read repo files via
+`$AUTOMEDON_WORKFLOW_DIR`. There is no remote installer for it — it is an
+example/template for coding the Automedon project itself.
 
-**Do not edit the project's source yourself.** Your only output is a `TASK.md`.
-Every code change comes from the orchestrator's agents.
+**Do not edit the project's source yourself.** Give it the issue; every code
+change and every git operation (worktree, branch, push, PR) comes from the
+Workflow.
 
 ### Prerequisites
 
-- `automedon` on `PATH`, plus `claude` and `cargo` — the coder's Steps drive a
-  `claude` agent and run `cargo build && cargo test`.
+- `automedon`, `claude`, `cargo`, and `gh` on `PATH` — the Workflow's Steps read
+  the issue and open the PR with `gh`, drive `claude` agents, and run
+  `cargo build && cargo test`.
 - **Re-install after engine changes.** The `automedon` binary is a build
   snapshot. Because this Workflow can modify the engine itself (the
   `orchestrator`/`kernel` crates), re-run the repo's `scripts/dev-install.sh`
-  whenever the engine changes, so the binary you run reflects them. (The repo's
-  `install.sh` downloads a prebuilt release and would not pick up your changes.)
+  whenever the engine changes, so the binary you run reflects them.
 
-### Process
+### Running it
 
-Run from the root of the Automedon checkout — its working directory is
-the repo the coder reads, edits, and commits.
+From the root of the Automedon checkout, give the entry Message as an issue
+number or URL:
 
-1. **Read the issue:** `gh issue view <number>`.
-2. **Branch** — the `commit` Step commits on the current branch, so never run on
-   `main`: `git checkout -b feat/<slug>`.
-3. **Write the task** at `.workflows/<slug>/TASK.md` (kebab-case `<slug>`, e.g.
-   `14-fix-prune-race`). `.workflows/` is gitignored and is *this skill's*
-   convention for organizing task specs — it is **not** part of the engine, which
-   receives only the file's *path* as the entry Message. Keep the spec concrete:
+```sh
+automedon run examples/autocoder.yaml --message 42
+```
 
-   ```md
-   # <issue #> — <title>
-   **Goal.** What must be true afterward, and why.
-   **Exercises.** The concrete changes / files involved.
-   **Done when.** Observable acceptance criteria (e.g. the tests that pass).
-   ```
-4. **Run the coder:**
-   ```sh
-   automedon run examples/coder.yaml --message .workflows/<slug>/TASK.md
-   ```
-5. **Read the outcome** from the trace's final line `◆ RUN ended -> exit <code>`
-   (not a shell/`tee` exit code):
-   - `0` — review approved; the change is committed on your branch.
-   - `90` — escalated (the build failed or review did not converge); changes are
-     left unstaged for you. Diagnose (below), refine the `TASK.md`, and re-run.
+### Reading the outcome
 
-### Diagnosing an EXIT 90
+Read the trace's final line `◆ RUN ended -> exit <code>` (not a shell/`tee`
+exit code):
 
-- The orchestrator prints the Run's ephemeral scratch directory (`$AUTOMEDON_RUN_DIR`) to
-  stderr on a failed Run. The coder leaves `FINDINGS.md` (review findings) and
-  `BUILD_FAILURE.md` (build/test output) there — read them while refining the
-  `TASK.md`.
-- The durable log under `~/.local/state/automedon/runs/<run-id>/` (newest
-  sorts last) holds each Step's `.stderr` sidecar; read the failing Step's to see
-  why it failed. The `automedon` skill documents the log layout.
+- `0` — the PR is open and ready for review. Review it on GitHub.
+- `90` — escalated (distilling/checking out the issue failed, the build failed,
+  review did not converge, or pushing/opening the PR failed). Diagnose in the
+  worktree the Run left in place:
+  - The orchestrator prints the Run's ephemeral scratch directory
+    (`$AUTOMEDON_RUN_DIR`) to stderr on a failed Run. The coder leaves
+    `FINDINGS.md` (review findings) and `BUILD_FAILURE.md` (build/test output)
+    there.
+  - The durable log under `~/.local/state/automedon/runs/<run-id>/` (newest
+    sorts last) holds each Step's `.stderr` sidecar; read the failing Step's to
+    see why it failed. The `automedon` skill documents the log layout.
+  - Refine the GitHub issue with whatever the failure revealed, then re-run the
+    same command — recovery reuses the existing worktree and branch rather than
+    starting over.
 
-### On success
+### Post-merge cleanup
 
-Review the coder's commit (`git show`), then push and open a PR yourself.
+Once the PR merges, remove its worktree and branch:
+
+```sh
+git worktree remove ../automedon.worktrees/<slug> && git branch -d <branch>
+```

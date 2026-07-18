@@ -17,12 +17,13 @@ fn skill(name: &str) -> String {
 
 #[test]
 fn skills_invoke_the_renamed_binary() {
-    // The autocoder runs the coder Workflow; the engine skill shows the generic
-    // invocation. Both must call the installed command, which is now `automedon`.
+    // The autocoder runs the autocoder Workflow; the engine skill shows the
+    // generic invocation. Both must call the installed command, which is now
+    // `automedon`.
     let autocoder = skill("autocoder");
     assert!(
-        autocoder.contains("automedon run examples/coder.yaml"),
-        "autocoder must run the coder Workflow with `automedon run`"
+        autocoder.contains("automedon run examples/autocoder.yaml"),
+        "autocoder must run the autocoder Workflow with `automedon run`"
     );
 
     let engine = skill("automedon");
