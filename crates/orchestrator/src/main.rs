@@ -11,6 +11,8 @@ use kernel::{Registry, RunConfig, Sink, SubprocessExecutor, WorkflowSource};
 use sinks::{ConsoleSink, FileSink, Tee};
 
 mod loader;
+mod plan;
+mod validate;
 
 /// A `WorkflowSource` that parses a Workflow registry from a root YAML file
 /// (`root:` + `workflows:`), transitively loading any files its Composite Steps
@@ -50,6 +52,7 @@ struct Cli {
     log_dir: Option<String>,
     keep: Option<String>,
     max_depth: Option<String>,
+    dry_run: bool,
 }
 
 /// The invocation is missing the positional Workflow path.
@@ -65,14 +68,20 @@ automedon — run an agent Workflow
 usage: automedon <command> [args]
 
 commands:
-  run     Run a Workflow from a YAML file
-  help    Show this help
+  run       Run a Workflow from a YAML file
+  validate  Statically check a Workflow for graph errors
+  help      Show this help
 
 Run `automedon <command> --help` for command-specific usage.";
 
 /// Usage for the `run` subcommand alone. Printed for `run --help` (stdout) or a
 /// `run` invocation missing its Workflow path (stderr).
-const RUN_USAGE: &str = "usage: automedon run <workflow.yaml> [--message <text>]";
+const RUN_USAGE: &str =
+    "usage: automedon run <workflow.yaml> [--message <text>] [--dry-run]";
+
+/// Usage for the `validate` subcommand alone. Printed for `validate --help`
+/// (stdout) or a `validate` invocation missing its Workflow path (stderr).
+const VALIDATE_USAGE: &str = "usage: automedon validate <workflow.yaml>";
 
 /// The outcome of parsing argv: run a Workflow, show requested help (a success,
 /// exit 0), or a usage error (exit non-zero). Help and usage errors carry the
@@ -81,6 +90,7 @@ const RUN_USAGE: &str = "usage: automedon run <workflow.yaml> [--message <text>]
 #[derive(Debug, PartialEq)]
 enum Invocation {
     Run(Box<Cli>),
+    Validate(PathBuf),
     Help(&'static str),
     Usage(&'static str),
 }
@@ -104,6 +114,15 @@ impl Cli {
                     Err(UsageError) => Invocation::Usage(RUN_USAGE),
                 }
             }
+            Some((cmd, rest)) if cmd == "validate" => {
+                if rest.iter().any(|a| a == "--help" || a == "-h") {
+                    return Invocation::Help(VALIDATE_USAGE);
+                }
+                match rest.iter().find(|a| !a.starts_with('-')) {
+                    Some(path) => Invocation::Validate(PathBuf::from(path)),
+                    None => Invocation::Usage(VALIDATE_USAGE),
+                }
+            }
             Some((cmd, _)) if cmd == "help" || cmd == "--help" || cmd == "-h" => {
                 Invocation::Help(TOP_USAGE)
             }
@@ -123,6 +142,7 @@ impl Cli {
         let mut log_dir = None;
         let mut keep = None;
         let mut max_depth = None;
+        let mut dry_run = false;
 
         // Each flag's spelling and whether it consumes the next argument as its
         // value are defined only here — one source of truth for the flag vocabulary.
@@ -151,6 +171,10 @@ impl Cli {
                     quiet = true;
                     i += 1;
                 }
+                "--dry-run" => {
+                    dry_run = true;
+                    i += 1;
+                }
                 _ if arg.starts_with('-') => i += 1,
                 _ => {
                     path.get_or_insert_with(|| PathBuf::from(arg));
@@ -160,7 +184,7 @@ impl Cli {
         }
 
         match path {
-            Some(path) => Ok(Cli { path, message, quiet, log_dir, keep, max_depth }),
+            Some(path) => Ok(Cli { path, message, quiet, log_dir, keep, max_depth, dry_run }),
             None => Err(UsageError),
         }
     }
@@ -171,6 +195,21 @@ fn main() {
 
     let cli = match Cli::parse(&args) {
         Invocation::Run(cli) => *cli,
+        Invocation::Validate(path) => {
+            let registry = loader::load(&path).unwrap_or_else(|e| {
+                eprintln!("failed to load workflow: {e}");
+                std::process::exit(2);
+            });
+            let problems = validate::check(&registry);
+            if problems.is_empty() {
+                println!("{}: valid", path.display());
+                std::process::exit(0);
+            }
+            for problem in &problems {
+                eprintln!("{problem}");
+            }
+            std::process::exit(1);
+        }
         // Explicit help is a success: usage to stdout, exit 0.
         Invocation::Help(usage) => {
             println!("{usage}");
@@ -202,6 +241,13 @@ fn main() {
         eprintln!("failed to load workflow: {e}");
         std::process::exit(2);
     });
+
+    // A dry run prints the plan the Kernel would execute and exits before any
+    // Frame, Sink, or run/log directory is created — it must not produce a Run.
+    if cli.dry_run {
+        print!("{}", plan::describe(&registry));
+        std::process::exit(0);
+    }
 
     // Read stdin only when it is piped or redirected; a terminal stdin would
     // block on an end-of-file that never arrives.
@@ -351,6 +397,41 @@ mod tests {
     fn parse_run_help_flags_request_run_usage() {
         for flag in ["--help", "-h"] {
             assert_eq!(Cli::parse(&args(&["run", flag])), Invocation::Help(super::RUN_USAGE));
+        }
+    }
+
+    #[test]
+    fn parse_recognizes_the_dry_run_flag() {
+        let cli = run(&["run", "wf.yaml", "--dry-run"]);
+        assert!(cli.dry_run);
+    }
+
+    #[test]
+    fn parse_dry_run_defaults_to_false() {
+        let cli = run(&["run", "wf.yaml"]);
+        assert!(!cli.dry_run);
+    }
+
+    #[test]
+    fn parse_validate_takes_the_workflow_path() {
+        match Cli::parse(&args(&["validate", "wf.yaml"])) {
+            Invocation::Validate(path) => assert_eq!(path, std::path::PathBuf::from("wf.yaml")),
+            other => panic!("expected a validate invocation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_validate_without_a_positional_is_a_usage_error() {
+        assert_eq!(Cli::parse(&args(&["validate"])), Invocation::Usage(super::VALIDATE_USAGE));
+    }
+
+    #[test]
+    fn parse_validate_help_flags_request_validate_usage() {
+        for flag in ["--help", "-h"] {
+            assert_eq!(
+                Cli::parse(&args(&["validate", flag])),
+                Invocation::Help(super::VALIDATE_USAGE)
+            );
         }
     }
 
