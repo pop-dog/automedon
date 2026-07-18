@@ -2,6 +2,7 @@
 name = "sinks"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 publish = false
 
 # Sinks are Modules: they depend on the Kernel's Observer interface (the `Sink`
