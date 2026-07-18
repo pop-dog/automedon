@@ -101,16 +101,16 @@ Budget), then takes the `EXHAUSTED` Gate to `EXIT 42`, proving the engine is
 total:
 
 ```sh
-cargo run -p orchestrator -- run examples/loop.yaml ; echo "exit=$?"
+automedon run examples/loop.yaml ; echo "exit=$?"
 ```
 
 ## Usage
 
-Point the `orchestrator` binary at a Workflow YAML file and, optionally, seed the
+Point the `automedon` binary at a Workflow YAML file and, optionally, seed the
 entry Step with an initial Message:
 
 ```sh
-cargo run -p orchestrator -- run <workflow.yaml> --message "<text>"
+automedon run <workflow.yaml> --message "<text>"
 ```
 
 The flagship example, [`examples/coder.yaml`](examples/coder.yaml), is an
@@ -124,8 +124,12 @@ human and the review findings in the Run's scratch directory (`$AUTOMEDON_RUN_DI
 on a failed Run — see "Step environment"). Run it from the repo root:
 
 ```sh
-cargo run -p orchestrator -- run examples/coder.yaml --message ./TASK.md
+automedon run examples/coder.yaml --message ./TASK.md
 ```
+
+Contributors building from source in-repo run the same commands via `cargo run
+-p orchestrator --`, e.g. `cargo run -p orchestrator -- run
+examples/loop.yaml`, instead of installing the `automedon` binary.
 
 Each LLM Step runs its agent unattended, since a Workflow Step is
 non-interactive. The narrow `commit` and `review` Steps run under scoped
