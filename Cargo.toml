@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["crates/kernel", "crates/orchestrator", "crates/sinks"]
+
+[workspace.package]
+license = "MIT"

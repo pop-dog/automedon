@@ -250,6 +250,4 @@ vertical slices, each covered by tests.
 
 ## License
 
-This project is not yet licensed. No license has been chosen, so all rights are
-reserved by the authors pending a license decision; it is published for reference
-and not yet offered under open-source terms.
+This project is licensed under the [MIT License](LICENSE).
