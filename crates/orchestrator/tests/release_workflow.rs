@@ -32,13 +32,19 @@ fn release_workflow_triggers_on_version_tags() {
 fn release_workflow_builds_the_supported_targets() {
     let body = read_workflow();
     // macOS ships Apple Silicon only; there is no Intel (x86_64) Darwin build.
+    // Linux ships static musl binaries, so a gnu triple appearing would mean
+    // the release had regressed to glibc-linked builds.
     for triple in [
-        "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-musl",
         "aarch64-apple-darwin",
     ] {
         assert!(body.contains(triple), "missing build target {triple}");
     }
+    assert!(
+        !body.contains("-unknown-linux-gnu"),
+        "Linux release binaries must be static musl, not glibc"
+    );
     assert!(
         !body.contains("x86_64-apple-darwin"),
         "Intel macOS is intentionally unsupported"
