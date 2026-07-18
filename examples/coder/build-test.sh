@@ -13,12 +13,19 @@ set -u
 # cross-Step handoff (review writes the findings that the next code pass reads).
 : "${AUTOMEDON_RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
 
+# The forkable example repo-location helper: task_repo_cd puts this Step in
+# the repository that actually holds the task file, which may be a sibling
+# git worktree the orchestrator was not started in (see the autocoder
+# wrapper's checkout.sh).
+. "$AUTOMEDON_WORKFLOW_DIR/lib/repo.sh"
+
 task_path="$(cat)"
 
 # Stub mode scripts the gate so the Workflow's routing can be tested without
-# invoking cargo: `pass` (default) is green, `fail` is always red, and
-# `fail-once` is red on its first activation and green thereafter (so a retry can
-# be exercised), recording that it has failed in a marker file.
+# invoking cargo (or requiring the in-Message to be a real path): `pass`
+# (default) is green, `fail` is always red, and `fail-once` is red on its
+# first activation and green thereafter (so a retry can be exercised),
+# recording that it has failed in a marker file.
 if [ "${CODER_STUB:-}" = "1" ]; then
     printf '%s' "$task_path"
     case "${CODER_STUB_BUILD:-pass}" in
@@ -32,6 +39,8 @@ if [ "${CODER_STUB:-}" = "1" ]; then
         *) exit 0 ;;
     esac
 fi
+
+task_repo_cd "$task_path" || exit 1
 
 # Capture build+test output so a failure can be handed back to the coding agent,
 # while still streaming it to stderr for the live view.

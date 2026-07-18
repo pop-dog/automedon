@@ -24,14 +24,23 @@ set -u
 # live next to this script under prompts/.
 . "$AUTOMEDON_WORKFLOW_DIR/lib/llm.sh"
 
+# The forkable example repo-location helper: task_repo_cd puts this Step in
+# the repository that actually holds the task file, which may be a sibling
+# git worktree the orchestrator was not started in (see the autocoder
+# wrapper's checkout.sh).
+. "$AUTOMEDON_WORKFLOW_DIR/lib/repo.sh"
+
 task_path="$(cat)"
 
-# Stub mode keeps the Step inert (no agent, no edits) so the Workflow's routing
-# and totality can be tested without invoking an LLM.
+# Stub mode keeps the Step inert (no agent, no edits, no cd) so the
+# Workflow's routing and totality can be tested without invoking an LLM or
+# requiring the in-Message to be a real path.
 if [ "${CODER_STUB:-}" = "1" ]; then
     printf '%s' "$task_path"
     exit "${CODER_STUB_CODE:-0}"
 fi
+
+task_repo_cd "$task_path" || exit 1
 
 # On a loop-back the agent is re-entered to fix what the deterministic Steps
 # caught: a review's Blocking findings and/or a failing build/test run, each left
