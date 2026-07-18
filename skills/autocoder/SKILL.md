@@ -59,8 +59,9 @@ exit code):
     sorts last) holds each Step's `.stderr` sidecar; read the failing Step's to
     see why it failed. The `automedon` skill documents the log layout.
   - Refine the GitHub issue with whatever the failure revealed, then re-run the
-    same command — recovery reuses the existing worktree and branch rather than
-    starting over.
+    same command — recovery reuses the existing worktree and branch, and
+    re-distills the TASK.md from the refined issue so the new spec reaches the
+    agents.
 
 ### Post-merge cleanup
 

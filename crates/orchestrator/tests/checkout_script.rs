@@ -176,14 +176,22 @@ fn recovery_reuses_the_existing_worktree_and_branch() {
     assert_eq!(code, 0, "first run should succeed; stderr:\n{stderr}");
     let worktree = worktrees_root(&repo.path).join("9-flaky-test");
 
-    // Re-emit the same branch name, as distill's recovery path does, with no
-    // staged TASK.md this time (nothing new was fetched).
-    let (code2, stdout2, stderr2) = run_checkout(&repo.path, &run_dir.0, "fix/9-flaky-test", None);
+    // Re-emit the same branch name, as distill's recovery path does, with a
+    // freshly re-distilled TASK.md staged: refining the issue and re-running
+    // must reach the agents, so recovery replaces the stale spec.
+    let (code2, stdout2, stderr2) = run_checkout(
+        &repo.path,
+        &run_dir.0,
+        "fix/9-flaky-test",
+        Some("# Flaky test, refined\n"),
+    );
     assert_eq!(code2, 0, "recovery run should succeed; stderr:\n{stderr2}");
     assert_eq!(stdout, stdout2, "recovery should re-emit the same TASK.md path");
-    assert!(
-        worktree.join(".workflows/9-flaky-test/TASK.md").is_file(),
-        "the original TASK.md should still be in place"
+    let refreshed =
+        std::fs::read_to_string(worktree.join(".workflows/9-flaky-test/TASK.md")).unwrap();
+    assert_eq!(
+        refreshed, "# Flaky test, refined\n",
+        "recovery should replace the worktree's TASK.md with the re-distilled spec"
     );
 
     let _ = std::process::Command::new("git")

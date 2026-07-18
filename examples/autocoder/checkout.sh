@@ -12,7 +12,8 @@
 #
 # Recovery: distill re-emits the branch name for an issue it already staged;
 # this Step then reuses the existing worktree/branch instead of recreating
-# it. Every other collision — the branch existing without this issue's
+# it, and replaces its TASK.md with the freshly re-distilled one so a
+# refined issue reaches the agents. Every other collision — the branch existing without this issue's
 # TASK.md, an unregistered worktree directory already at the expected path,
 # or the branch checked out somewhere else — fails closed (non-zero exit, an
 # explanatory message on stderr) rather than guessing which state to trust.
@@ -61,8 +62,10 @@ elsewhere="$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '
 
 if git show-ref --verify --quiet "refs/heads/$branch"; then
     if [ "$elsewhere" = "$worktree" ] && [ -f "$task_md" ]; then
-        # Recovery: same branch, same expected worktree, this issue's staged
-        # TASK.md already landed there in a previous run.
+        # Recovery: same branch, same expected worktree, this issue's TASK.md
+        # already landed there in a previous run. Distill re-distilled the
+        # (possibly refined) issue, so its fresh spec replaces the stale one.
+        mv "$AUTOMEDON_RUN_DIR/TASK.md" "$task_md" || exit 1
         printf '%s' "$task_md"
         exit 0
     fi
