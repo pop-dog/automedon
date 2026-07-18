@@ -7,6 +7,10 @@
 # verdict vocabulary here. The gate fails closed — only an explicit, valid
 # decision can approve, so a review agent that crashes or emits no decision routes
 # through the Default (escalate) instead of advancing un-reviewed code.
+#
+# Knobs: CODER_STUB=1 keeps the Step inert (CODER_STUB_REVIEW picks the stubbed
+# outcome); CODER_REVIEW_MODEL picks the `claude` model — opus by default, since
+# judging a diff warrants the strongest reviewer.
 set -u
 
 # Orchestration scratch lives in the ephemeral Run Directory the engine provides,
@@ -29,17 +33,13 @@ if [ "${CODER_STUB:-}" = "1" ]; then
     esac
 fi
 
-# Build the review task: drive the /code-review skill and write the findings to
-# $AUTOMEDON_RUN_DIR/FINDINGS.md, grouped Blocking vs Suggestion for the next code pass.
-# Appending the menu from llm_prompt lets the model choose its outcome from this
-# Step's Gates, closing the prompt/parse-vs-routing drift.
-task='Use the /code-review skill to review the unstaged changes. Write the
-findings to a file at '"$AUTOMEDON_RUN_DIR"'/FINDINGS.md, grouping any
-Critical and Major findings under a "## Blocking" heading and any Minor and Nit
-findings under a "## Suggestion" heading.
-
-After writing the file, decide how to route this review:
-'"$(llm_prompt)"
+# Build the review task from its template: write the findings to
+# $AUTOMEDON_RUN_DIR/FINDINGS.md, grouped Blocking vs Suggestion for the next
+# code pass. Filling {{DECISION_MENU}} from llm_prompt lets the model choose its
+# outcome from this Step's Gates, closing the prompt/parse-vs-routing drift.
+task="$(llm_render "${0%/*}/prompts/review.md" \
+    FINDINGS_FILE="$AUTOMEDON_RUN_DIR/FINDINGS.md" \
+    DECISION_MENU="$(llm_prompt)")" || exit 1
 
 # Run the review agent unattended under a scoped permission policy. The
 # /code-review skill drives many read tools, so the policy uses bypassPermissions
@@ -47,7 +47,7 @@ After writing the file, decide how to route this review:
 # would block the skill. Its deny rules still hold the line that matters: review
 # may read freely and write its findings, but cannot edit crate source or stage,
 # commit, or push — so no review-introduced change can advance un-reviewed.
-reply="$(claude --settings "${0%/*}/review.permissions.json" -p "$task" 2>/dev/null)"
+reply="$(claude --settings "${0%/*}/review.permissions.json" --model "${CODER_REVIEW_MODEL:-opus}" -p "$task" 2>/dev/null)"
 
 # Re-emit the path (the out-Message) before mapping the verdict. llm_parse is
 # stdout-silent and exits with the chosen Gate key, failing closed to the Default

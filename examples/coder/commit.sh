@@ -2,6 +2,9 @@
 # `commit` Step: read the TASK.md path from stdin, write a commit message from
 # the diff and the task, and commit on the current branch. Never pushes — a
 # human is responsible for being on a sensible branch. Re-emits the path.
+#
+# Knobs: CODER_STUB=1 keeps the Step inert; CODER_COMMIT_MODEL picks the
+# `claude` model — haiku by default, enough for writing a commit message.
 set -u
 
 # Orchestration scratch lives in the ephemeral Run Directory the engine provides,
@@ -10,6 +13,10 @@ set -u
 # cross-Step handoff (review writes the findings that the next code pass reads).
 : "${AUTOMEDON_RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
 
+# The forkable example LLM helper: llm_render fills the prompt template that
+# lives next to this script under prompts/.
+. "$AUTOMEDON_WORKFLOW_DIR/lib/llm.sh"
+
 task_path="$(cat)"
 
 if [ "${CODER_STUB:-}" = "1" ]; then
@@ -17,15 +24,14 @@ if [ "${CODER_STUB:-}" = "1" ]; then
     exit 0
 fi
 
-prompt="Use the /commit skill to commit the current changes on the current
-branch, using the task in the file at ${task_path} for intent. Do not push."
+prompt="$(llm_render "${0%/*}/prompts/commit.md" TASK_FILE="$task_path")" || exit 1
 
 # Run the commit agent unattended under a scoped permission policy. A Workflow
 # Step is non-interactive, so the policy uses bypassPermissions (no prompts to
 # hang on) while its deny rules still enforce the "never pushes" invariant — a
 # denied tool cannot be re-allowed by anything the agent does. The narrow git
 # toolset here keeps that allowlist short; the broad code Step cannot.
-claude --settings "${0%/*}/commit.permissions.json" -p "$prompt" 1>&2
+claude --settings "${0%/*}/commit.permissions.json" --model "${CODER_COMMIT_MODEL:-haiku}" -p "$prompt" 1>&2
 code=$?
 
 # On a successful commit the review's findings have been addressed and approved,

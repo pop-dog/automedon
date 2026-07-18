@@ -33,6 +33,45 @@ llm_prompt() {
     printf '%s\n' "End your reply with exactly one final line of the form 'DECISION: <key>', choosing one of the keys listed above."
 }
 
+# llm_render <template-file> [NAME=value ...] — print the template on stdout
+# with each `{{NAME}}` placeholder replaced by its value. Substitution uses only
+# shell parameter expansion, so values may safely contain any characters a
+# sed/awk pattern would mangle.
+llm_render() {
+    llm_render_tpl="$1"
+    llm_render_out="$(cat "$llm_render_tpl")" || return 1
+    shift
+    for llm_render_pair in "$@"; do
+        llm_render_name="${llm_render_pair%%=*}"
+        llm_render_value="${llm_render_pair#*=}"
+        case "$llm_render_out" in
+            *"{{$llm_render_name}}"*) ;;
+            *)
+                printf 'llm_render: pair %s matches no placeholder in %s\n' \
+                    "$llm_render_name" "$llm_render_tpl" >&2
+                return 1
+                ;;
+        esac
+        llm_render_done=""
+        llm_render_rest="$llm_render_out"
+        while [ "${llm_render_rest#*"{{$llm_render_name}}"}" != "$llm_render_rest" ]; do
+            llm_render_done="${llm_render_done}${llm_render_rest%%"{{$llm_render_name}}"*}${llm_render_value}"
+            llm_render_rest="${llm_render_rest#*"{{$llm_render_name}}"}"
+        done
+        llm_render_out="${llm_render_done}${llm_render_rest}"
+    done
+    case "$llm_render_out" in
+        *'{{'*'}}'*)
+            llm_render_left="${llm_render_out#*"{{"}"
+            llm_render_left="${llm_render_left%%"}}"*}"
+            printf 'llm_render: unresolved placeholder {{%s}} in %s\n' \
+                "$llm_render_left" "$llm_render_tpl" >&2
+            return 1
+            ;;
+    esac
+    printf '%s\n' "$llm_render_out"
+}
+
 # Read the model's reply on stdin and map it to an exit code. The last
 # `DECISION: <key>` line wins; a key that names a Code gate exits with that
 # integer, anything else exits a non-zero code that is no Code key so routing
