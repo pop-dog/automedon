@@ -1,28 +1,50 @@
-## Comments
-* Comments should be written for FUTURE readers to give context that is not obvious
-from the code alone.
-* Comments should NEVER include context directly referencing your current task.
-* Prefer complete sentences with punctuation
-* Guidelines:
-    * Comments should not duplicate the code.
-    * Good comments do not excuse unclear code.
-    * If you can't write a clear comment, there may be a problem with the code.
-    * Comments should dispel confusion, not cause it.
-    * Explain unidiomatic code in comments.
-    * Provide links to the original source of copied code.
-    * Include links to external references where they will be most helpful.
-    * Add comments when fixing bugs.
-    * Use comments to mark incomplete implementations.
+# Coding Standards
+## Documentation
+* Aggressively prune stale documentation.
+* Code should be self-documenting via good code and comment hygiene. Docs should be written at a level of abstraction that code refactors do not make the docs stale.
+* Most design should live in Pull Requests outside of the source code. In-source design should be reserved for guiding future development. If it's ambiguous, bias towards pruning.
 
-## Commit messages
-* Limit the subject line to 50 characters
-* Capitalize the subject/description line
-* Do not end the subject line with a period
-* Separate the subject from the body with a blank line
-* Wrap the body at 72 characters
-* Use the body to explain what and why
-* Use the imperative mood in the subject line let it seem like you’re giving a command eg “feat: Add unit tests for user authentication”. Using the imperative mood in commit messages makes them more consistent and commands-like, which is helpful in understanding the actions taken.
-* NEVER include details that are only relevant DURING the change, like discarded choices.
+## Comments
+* Use complete sentences.
+* Be precise and concise. Use large doc comments sparingly.
+* Describe "why", not "what" or "how". The code MUST speak for itself.
+* Write for a future audience. NEVER use comparative language to reference the state before this change.
+* A comment MUST add information the annotated code cannot convey on its own. If the symbol name, signature, or an adjacent declaration already states it, delete the comment.
+* NEVER restate a value or behavior that appears verbatim nearby — a routing table, an enum, a config field, or a called script's own header. Duplicated facts drift out of sync.
+* Let the named artifact speak for itself. Do not narrate a step, function, or call whose name and body already say what it does; comment only the non-obvious (a rationale, a constraint, or a magic number's derivation).
+* Do not annotate every element for symmetry. Most lines need no comment; add one only where there is genuinely something a future reader would otherwise miss.
+
+## Commit Messages
+* Capitalized subject line ≤ 50 characters.
+* Body lines ≤ 72 characters.
+* Use imperative case.
+* Write for a future audience.
+* Detailed accounting of decisions, alternatives considered, etc. should live in the Pull Request, not the commit.
+
+### Conventional Commits
+1. Commits MUST be prefixed with a type, which consists of a noun, feat, fix, etc., followed by a colon and a space.
+2. The type feat MUST be used when a commit adds a new feature to your application or library.
+3. The type fix MUST be used when a commit represents a bug fix for your application.
+4. An optional scope MAY be provided after a type. A scope is a phrase describing a section of the codebase enclosed in parenthesis, e.g., fix(parser):
+5. A description MUST immediately follow the type/scope prefix. The description is a short description of the code changes, e.g., fix: array parsing issue when multiple spaces were contained in string.
+6. A longer commit body MAY be provided after the short description, providing additional contextual information about the code changes. The body MUST begin one blank line after the description.
+7. A footer MAY be provided one blank line after the body (or after the description if body is missing). The footer SHOULD contain additional issue references about the code changes (such as the issues it fixes, e.g.,Fixes #13).
+8. Breaking changes MUST be indicated at the very beginning of the footer or body section of a commit. A breaking change MUST consist of the uppercase text BREAKING CHANGE, followed by a colon and a space.
+9. A description MUST be provided after the BREAKING CHANGE: , describing what has changed about the API, e.g., BREAKING CHANGE: environment variables now take precedence over config files.
+10. The footer MUST only contain BREAKING CHANGE, external links, issue references, and other meta-information.
+11. Types other than feat and fix MAY be used in your commit messages.
+
+## Pull Requests
+* Follow a structure of "Background", "Why", "Approach", "Testing".
+* **Background.** Establish a foundation to frame the change.
+* **Why.** Justify the change. What problem is this solving?
+* **Approach.** How does this change solve the problem?
+    - **Alternatives Considered (Optional).** If other solutions were considered and discarded, document them here.
+* **Visual aids (Optional).** Include Mermaid diagrams and Markdown tables when they help illustrate the change. For example, if there are non-obvious relationships between
+modules, or the change involves a process flow, a Mermaid diagram is appropriate.
+* **Testing.** How was this change testing? Does this change introduce new tests?
+* **Compatibility (Optional).** Does this introduce any backwards-incompatible changes?
+
 
 ## Unit Tests
 * Require 60% test coverage.
