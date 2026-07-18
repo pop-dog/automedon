@@ -1,7 +1,7 @@
 //! A trace Sink: one line per Kernel transition on stdout, plus a live, dim,
 //! step-prefixed tee of Step output on stderr. The console rendering — ANSI
 //! styling and the Event-to-line mapping — is a Module concern, kept out of the
-//! Kernel (ADR-0003).
+//! Kernel.
 
 use kernel::{Event, Fault, GateKey, GateTarget, Sink, Stream};
 

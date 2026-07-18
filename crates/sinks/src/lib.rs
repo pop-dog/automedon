@@ -1,5 +1,5 @@
-//! Sinks — concrete Modules over the Kernel's `Sink` Observer interface
-//! (ADR-0003). The Kernel never persists or renders anything itself; these
+//! Sinks — concrete Modules over the Kernel's `Sink` Observer interface.
+//! The Kernel never persists or renders anything itself; these
 //! implementations do, and they depend on the Kernel, never the reverse:
 //!
 //! * [`ConsoleSink`] — a live trace on the console.

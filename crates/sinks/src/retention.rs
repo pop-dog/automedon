@@ -1,6 +1,6 @@
 //! Run-directory retention: a count cap that keeps the most recent `keep` Runs
 //! and removes the rest, oldest first. UUIDv7 names sort chronologically, so the
-//! lexicographically smallest entries are the oldest (ADR-0009, decision 7).
+//! lexicographically smallest entries are the oldest.
 
 use std::path::Path;
 

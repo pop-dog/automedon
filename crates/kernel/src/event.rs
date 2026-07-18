@@ -8,7 +8,7 @@ use crate::ir::{GateKey, GateTarget};
 /// on separate working state (this is event *logging*, not sourcing).
 ///
 /// `Serialize` lets a persistence Sink render the stream (e.g. as JSON); the
-/// Kernel still chooses no concrete format (ADR-0005).
+/// Kernel still chooses no concrete format.
 #[derive(Debug, Clone, Serialize)]
 pub enum Event {
     RunStarted,
@@ -41,7 +41,6 @@ pub enum Fault {
     UnhandledExhaustion { step: String },
     /// Entering a Composite Step would exceed the Run's max Depth. Carries the
     /// child `workflow` that could not be pushed. The one non-catchable Fault: it
-    /// is never offered to a `FAULT` Gate and aborts the Run unconditionally
-    /// (ADR-0002).
+    /// is never offered to a `FAULT` Gate and aborts the Run unconditionally.
     DepthOverflow { workflow: String },
 }

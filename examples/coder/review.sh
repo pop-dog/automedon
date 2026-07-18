@@ -32,7 +32,7 @@ fi
 # Build the review task: drive the /code-review skill and write the findings to
 # $AUTOMEDON_RUN_DIR/FINDINGS.md, grouped Blocking vs Suggestion for the next code pass.
 # Appending the menu from llm_prompt lets the model choose its outcome from this
-# Step's Gates, closing the prompt/parse-vs-routing drift (ADR-0012).
+# Step's Gates, closing the prompt/parse-vs-routing drift.
 task='Use the /code-review skill to review the unstaged changes. Write the
 findings to a file at '"$AUTOMEDON_RUN_DIR"'/FINDINGS.md, grouping any
 Critical and Major findings under a "## Blocking" heading and any Minor and Nit

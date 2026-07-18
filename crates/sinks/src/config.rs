@@ -1,6 +1,5 @@
 //! Resolving where Runs are logged and how many to retain. Kept as pure
-//! functions (no env/argv access) so the precedence rules are unit-testable
-//! (ADR-0009, decisions 4 and 7).
+//! functions (no env/argv access) so the precedence rules are unit-testable.
 
 use std::path::{Path, PathBuf};
 
@@ -35,7 +34,7 @@ pub fn runs_dir(
 }
 
 /// Resolve a Run's ephemeral Run Directory (`$AUTOMEDON_RUN_DIR`):
-/// `<temp_root>/automedon/runs/<run-id>/` (ADR-0010). It shares its
+/// `<temp_root>/automedon/runs/<run-id>/`. It shares its
 /// `run_id` with the durable log dir but lives under the OS temp root, not state,
 /// so the two correlate yet have independent lifecycles. Pure (the caller passes
 /// `std::env::temp_dir()`) so the layout is unit-testable without env access.

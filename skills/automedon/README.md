@@ -42,7 +42,7 @@ Step inherits, distinct from the Message:
   is recorded in the log's `meta.json`, and is **printed to stderr when a Run
   fails**.
 
-Design: [ADR-0010](https://github.com/pop-dog/automedon/blob/main/docs/adr/0010-step-environment-and-ephemeral-run-directory.md).
+Design: the ["Step environment" section of the project README](https://github.com/pop-dog/automedon/blob/main/README.md#step-environment).
 
 ## Reading the trace
 

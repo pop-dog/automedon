@@ -1,7 +1,7 @@
 //! A persistence Sink: writes one per-Run directory holding `events.jsonl` (the
 //! control plane, one record per line) and raw sidecar output files (the data
 //! plane). The Sink — not the Kernel — stamps each record with a monotonic `seq`
-//! and a wall-clock `ts` on receipt (ADR-0005, ADR-0009).
+//! and a wall-clock `ts` on receipt.
 
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -17,14 +17,14 @@ const EVENTS_FILE: &str = "events.jsonl";
 
 /// Orchestrator-owned run-metadata filename inside a Run directory. Holds facts
 /// the orchestrator (not the Kernel) knows about a Run — currently the Step
-/// environment — kept out of the Kernel's `events.jsonl` (ADR-0003/0010).
+/// environment — kept out of the Kernel's `events.jsonl`.
 const META_FILE: &str = "meta.json";
 
 /// Writes a single Run's records under `dir`.
 pub struct FileSink {
     dir: PathBuf,
     events: File,
-    /// Monotonic record counter assigned on receipt (ADR-0005).
+    /// Monotonic record counter assigned on receipt.
     seq: u64,
     /// Sidecar files already referenced in the log, so the pointer record is
     /// written once per stream rather than once per chunk.
@@ -42,7 +42,7 @@ struct EventRecord<'a> {
 
 /// One `events.jsonl` line pointing at a Step's raw sidecar output file. Keeps
 /// the bulk bytes out of the control plane while making them discoverable from
-/// it (ADR-0009).
+/// it.
 #[derive(Serialize)]
 struct OutputRecord<'a> {
     seq: u64,
@@ -70,7 +70,7 @@ impl FileSink {
     }
 
     /// Record the populated Step environment once, as orchestrator-owned run
-    /// metadata in `meta.json` — not a Kernel Event (ADR-0003/0010). Whatever the
+    /// metadata in `meta.json` — not a Kernel Event. Whatever the
     /// Step environment holds is logged, so future members are covered without
     /// changing this method. Best-effort: a metadata write failure must not abort
     /// the Run.
@@ -242,7 +242,7 @@ mod tests {
             ]);
         }
         // The Step environment lands in an orchestrator-owned metadata file, not
-        // in the Kernel's events.jsonl (ADR-0003/0010).
+        // in the Kernel's events.jsonl.
         assert!(!run_dir.join("events.jsonl").exists() || {
             let log = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
             !log.contains("AUTOMEDON_RUN_DIR")

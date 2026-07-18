@@ -32,9 +32,10 @@ exit codes routed through Gates, not by any model's reasoning. Its defining
 property is **totality** — every Run terminates, because every loop is bounded by
 a Budget and the engine routes a spent Budget through an explicit `EXHAUSTED`
 Gate rather than spinning forever. The Kernel is a microkernel implemented in
-Rust ([ADR-0006](docs/adr/0006-kernel-implemented-in-rust.md)); the domain
-vocabulary lives in [`CONTEXT.md`](CONTEXT.md) and the architectural decisions in
-[`docs/adr/`](docs/adr/).
+Rust, named for Achilles' charioteer — the driver who steers the team while the
+fighting happens up front: the engine only routes; the Steps do the work. The
+domain vocabulary lives in [`CONTEXT.md`](CONTEXT.md) and the engine's design
+boundary in [`docs/microkernel-boundary.md`](docs/microkernel-boundary.md).
 
 ## Key Features
 
@@ -157,8 +158,15 @@ it is piped:
   recorded in the log's `meta.json`, and is printed to stderr when a Run fails.
   The coder example writes its review findings and build output here.
 
-The Step environment is the Executor's concern, never the Kernel's
-([ADR-0010](docs/adr/0010-step-environment-and-ephemeral-run-directory.md)).
+One member varies per Step rather than being Run-constant: `$AUTOMEDON_GATES`,
+the Step's own routing contract — its integer and `*` Gates as JSON
+`{ key, when }` pairs describing how the Step's exit code will be routed. A
+Step-side helper (like the example LLM prompt generator in
+[`examples/lib/llm.sh`](examples/lib/llm.sh)) reads it, so what a Step is told
+about its routing can never drift from what the engine actually routes on.
+
+The Step environment is the Executor's concern, never the Kernel's (see
+[`docs/microkernel-boundary.md`](docs/microkernel-boundary.md)).
 
 ### Run logs
 
@@ -173,11 +181,10 @@ holds:
   sidecar per stream per activation, referenced from `events.jsonl`. To see *why*
   a Step failed, read its `.stderr` sidecar.
 - `meta.json` — orchestrator-owned Run metadata (currently the Step environment,
-  including `$AUTOMEDON_RUN_DIR`), kept out of the Kernel's `events.jsonl` (ADR-0003/0010).
+  including `$AUTOMEDON_RUN_DIR`), kept out of the Kernel's `events.jsonl`.
 
-This separation of a lean control-plane log from bulk output is
-[ADR-0009](docs/adr/0009-step-output-on-a-dedicated-sink-channel.md); the Kernel
-emits, the Sink persists ([ADR-0005](docs/adr/0005-observability-as-emitted-event-stream.md)).
+The control-plane trace is kept lean by carrying bulk Step output on its own
+channel; the Kernel emits, the Sink persists.
 
 Flags (each with an environment fallback):
 
@@ -190,15 +197,15 @@ Flags (each with an environment fallback):
 ## Crate layout
 
 This is a Cargo workspace (edition 2021). Dependency arrows point only at
-`kernel` — it is depended on but never depends back
-([ADR-0003](docs/adr/0003-microkernel-architecture.md)).
+`kernel` — it is depended on but never depends back (see
+[`docs/microkernel-boundary.md`](docs/microkernel-boundary.md)).
 
 ```text
 crates/kernel/         lib: IR types; WorkflowSource + Sink + StepExecutor traits;
                        the routing core (run loop) + the subprocess StepExecutor.
 crates/orchestrator/   bin: serde_yaml loader + console Sink + main().
 examples/              example Workflows (loop.yaml, coder.yaml).
-docs/                  ADRs, conventions, and developer docs.
+docs/                  developer docs (design boundary, conventions).
 ```
 
 ## Testing
@@ -207,8 +214,18 @@ docs/                  ADRs, conventions, and developer docs.
 cargo test
 ```
 
-For line-coverage instructions and what the engine covers, see
-[docs/coverage.md](docs/coverage.md).
+The run-loop tests (Gate routing, the Budget cascade, Exhaustion, Faults,
+Message piping) live in `crates/kernel`; the YAML-parsing tests live in
+`crates/orchestrator`, keeping the Kernel free of any format dependency. The
+`kernel` crate is the coverage target (the project requires 60% line coverage),
+measured with [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov):
+
+```sh
+rustup component add llvm-tools-preview   # one-time
+cargo install cargo-llvm-cov              # one-time
+cargo llvm-cov                            # summary table
+cargo llvm-cov --html --open              # browsable line-by-line report
+```
 
 ## Roadmap
 

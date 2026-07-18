@@ -1,6 +1,6 @@
 //! The per-Step routing contract: a generic, Kernel-owned description of how a
 //! leaf Step's exit code will be routed, projected from its Gates and handed
-//! across the execution seam (ADR-0012). It exposes *how your exit code routes* —
+//! across the execution seam. It exposes *how your exit code routes* —
 //! the `Code`/`Default` keys and their opaque `when` text — never targets
 //! (Kernel-internal routing; leaking sibling Step names would erode the
 //! black-box property) and never the non-exit-code `EXHAUSTED`/`FAULT` Gates.
