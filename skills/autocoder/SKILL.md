@@ -47,7 +47,14 @@ automedon run examples/autocoder.yaml --message 42
 Read the trace's final line `◆ RUN ended -> exit <code>` (not a shell/`tee`
 exit code):
 
-- `0` — the PR is open and ready for review. Review it on GitHub.
+- `0` — the PR is open and ready for review. Before handing the link to the
+  user, do your own conversation-only first-pass review: read the PR diff and,
+  where cheap, exercise the built artifact. Report findings in conversation
+  only — no PR comments, no fixes. You hold provenance the in-Workflow
+  reviewer lacks (the originating issue's discussion and related decisions),
+  so this pass catches different things than that one did. All code changes
+  still come only from the Workflow's agents; the user decides merge vs.
+  refine-and-re-run from what you report.
 - `90` — escalated (distilling/checking out the issue failed, the build failed,
   review did not converge, or pushing/opening the PR failed). Diagnose in the
   worktree the Run left in place:
