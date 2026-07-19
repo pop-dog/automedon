@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use kernel::{Registry, RunConfig, Sink, SubprocessExecutor, WorkflowSource};
 use sinks::{ConsoleSink, FileSink, Tee};
 
+mod display_id;
 mod graph;
 mod loader;
 mod plan;
@@ -268,7 +269,11 @@ fn main() {
 
     // A dry run prints the plan the Kernel would execute and exits before any
     // Frame, Sink, or run/log directory is created — it must not produce a Run.
+    // The loaded root path is diagnostic value worth keeping, but only once —
+    // as this header — rather than repeated (and machine-specific) on every
+    // per-workflow line below.
     if cli.dry_run {
+        println!("root: {}", root_path(&registry));
         print!("{}", plan::describe(&registry));
         std::process::exit(0);
     }
@@ -362,6 +367,13 @@ fn main() {
 /// unset so a blank override falls through to the next source.
 fn env_var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+/// The canonical file path the registry was loaded from, recovered from
+/// `registry.root` (`<canonical path>#<name>`, see `loader::make_id`) rather
+/// than threaded separately through the `WorkflowSource` trait.
+fn root_path(registry: &Registry) -> &str {
+    registry.root.rsplit_once('#').map_or(registry.root.as_str(), |(path, _)| path)
 }
 
 // Tests for the YAML front-end live here (where the format dependency lives), not

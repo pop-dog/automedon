@@ -5,19 +5,32 @@
 
 use kernel::{GateKey, GateTarget, Registry, StepBody};
 
+use crate::display_id::display_id;
+
 /// Render `registry` as a single Mermaid `flowchart` with one `subgraph` per
-/// Workflow.
+/// Workflow. Subgraph titles and node ids use each Workflow's display id (see
+/// [`crate::display_id`]), never the loader's absolute-path-bearing id, so no
+/// machine-specific path reaches a README or PR pasted from this output.
 pub fn render(registry: &Registry) -> String {
     let mut out = String::from("flowchart TD\n");
     let mut ids: Vec<&String> = registry.workflows.keys().collect();
     ids.sort();
     for id in ids {
         let workflow = &registry.workflows[id];
-        out.push_str(&format!("  subgraph {}[\"{}\"]\n", subgraph_id(id), escape(id)));
+        let display = display_id(id, &registry.root);
+        out.push_str(&format!(
+            "  subgraph {}[\"{}\"]\n",
+            subgraph_id(&display),
+            escape(&display)
+        ));
         let mut names: Vec<&String> = workflow.steps.keys().collect();
         names.sort();
         for name in &names {
-            out.push_str(&format!("    {}[\"{}\"]\n", step_node_id(id, name), escape(name)));
+            out.push_str(&format!(
+                "    {}[\"{}\"]\n",
+                step_node_id(&display, name),
+                escape(name)
+            ));
         }
         let mut exit_codes: Vec<i32> = names
             .iter()
@@ -32,7 +45,7 @@ pub fn render(registry: &Registry) -> String {
         for code in &exit_codes {
             out.push_str(&format!(
                 "    {}((\"exit {code}\"))\n",
-                exit_node_id(id, *code)
+                exit_node_id(&display, *code)
             ));
         }
         out.push_str("  end\n");
@@ -40,12 +53,12 @@ pub fn render(registry: &Registry) -> String {
             let step = &workflow.steps[name];
             for gate in &step.gates {
                 let (target, label) = match &gate.target {
-                    GateTarget::Step(target) => (step_node_id(id, target), edge_label(gate)),
-                    GateTarget::Exit(code) => (exit_node_id(id, *code), edge_label(gate)),
+                    GateTarget::Step(target) => (step_node_id(&display, target), edge_label(gate)),
+                    GateTarget::Exit(code) => (exit_node_id(&display, *code), edge_label(gate)),
                 };
                 out.push_str(&format!(
                     "  {} -->|\"{}\"| {}\n",
-                    step_node_id(id, name),
+                    step_node_id(&display, name),
                     escape(&label),
                     target,
                 ));
@@ -55,11 +68,12 @@ pub fn render(registry: &Registry) -> String {
             // Gate-driven edges above, whose Gates already show how the
             // child's surfaced codes route back in the parent.
             if let StepBody::Workflow(child_id) = &step.body {
+                let child_display = display_id(child_id, &registry.root);
                 let child_entry = &registry.workflows[child_id].entry;
                 out.push_str(&format!(
                     "  {} -.-> {}\n",
-                    step_node_id(id, name),
-                    step_node_id(child_id, child_entry),
+                    step_node_id(&display, name),
+                    step_node_id(&child_display, child_entry),
                 ));
             }
         }
@@ -81,7 +95,8 @@ fn edge_label(gate: &kernel::Gate) -> String {
 /// The Gate key rendered as it appears in Workflow YAML, not its Rust debug
 /// name (`GateKey::Code(0)` -> `0`, `Default` -> `*`, etc.), so the diagram
 /// reads in the vocabulary an operator already knows from the source file.
-fn gate_key_str(key: &GateKey) -> String {
+/// Shared with the `run --dry-run` plan, which speaks to the same operator.
+pub(crate) fn gate_key_str(key: &GateKey) -> String {
     match key {
         GateKey::Code(n) => n.to_string(),
         GateKey::Default => "*".to_string(),
