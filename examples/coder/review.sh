@@ -46,6 +46,7 @@ task_repo_cd "$task_path" || exit 1
 # code pass. Filling {{DECISION_MENU}} from llm_prompt lets the model choose its
 # outcome from this Step's Gates, closing the prompt/parse-vs-routing drift.
 task="$(llm_render "${0%/*}/prompts/review.md" \
+    TASK_FILE="$task_path" \
     FINDINGS_FILE="$AUTOMEDON_RUN_DIR/FINDINGS.md" \
     DECISION_MENU="$(llm_prompt)")" || exit 1
 
