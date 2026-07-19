@@ -93,9 +93,11 @@ fn reachable_from(workflow: &Workflow, start: &str) -> HashSet<String> {
 }
 
 /// A cycle among Steps (via `Step` gate targets) none of whose members has an
-/// `EXHAUSTED` Gate — every Step's Budget is finite (the cascade always
-/// bottoms out at [`DEFAULT_BUDGET`]), so a cycle with no escape on
-/// exhaustion can spin forever once every member's Budget resets each Frame.
+/// `EXHAUSTED` Gate. Every Step's Budget is finite (the cascade always
+/// bottoms out at the default), so the loop cannot spin forever — the Kernel
+/// instead raises a Fault when a spent Budget has no `EXHAUSTED` Gate to
+/// take. This check surfaces at validate time the loop that would otherwise
+/// fault mid-Run.
 fn unescaped_budgeted_loops(id: &str, workflow: &Workflow, problems: &mut Vec<String>) {
     for scc in strongly_connected_components(workflow) {
         if scc.len() < 2 && !self_loop(workflow, &scc[0]) {
