@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use kernel::{Registry, RunConfig, Sink, SubprocessExecutor, WorkflowSource};
 use sinks::{ConsoleSink, FileSink, Tee};
 
+mod display_id;
+mod graph;
 mod loader;
 mod plan;
 mod validate;
@@ -70,6 +72,7 @@ usage: automedon <command> [args]
 commands:
   run       Run a Workflow from a YAML file
   validate  Statically check a Workflow for graph errors
+  graph     Emit a Mermaid flowchart of a Workflow's graph
   help      Show this help
 
 Run `automedon <command> --help` for command-specific usage.";
@@ -83,6 +86,10 @@ const RUN_USAGE: &str =
 /// (stdout) or a `validate` invocation missing its Workflow path (stderr).
 const VALIDATE_USAGE: &str = "usage: automedon validate <workflow.yaml>";
 
+/// Usage for the `graph` subcommand alone. Printed for `graph --help` (stdout)
+/// or a `graph` invocation missing its Workflow path (stderr).
+const GRAPH_USAGE: &str = "usage: automedon graph <workflow.yaml>";
+
 /// The outcome of parsing argv: run a Workflow, show requested help (a success,
 /// exit 0), or a usage error (exit non-zero). Help and usage errors carry the
 /// text to print so each context can point at the most specific usage, while the
@@ -91,6 +98,7 @@ const VALIDATE_USAGE: &str = "usage: automedon validate <workflow.yaml>";
 enum Invocation {
     Run(Box<Cli>),
     Validate(PathBuf),
+    Graph(PathBuf),
     Help(&'static str),
     Usage(&'static str),
 }
@@ -121,6 +129,15 @@ impl Cli {
                 match rest.iter().find(|a| !a.starts_with('-')) {
                     Some(path) => Invocation::Validate(PathBuf::from(path)),
                     None => Invocation::Usage(VALIDATE_USAGE),
+                }
+            }
+            Some((cmd, rest)) if cmd == "graph" => {
+                if rest.iter().any(|a| a == "--help" || a == "-h") {
+                    return Invocation::Help(GRAPH_USAGE);
+                }
+                match rest.iter().find(|a| !a.starts_with('-')) {
+                    Some(path) => Invocation::Graph(PathBuf::from(path)),
+                    None => Invocation::Usage(GRAPH_USAGE),
                 }
             }
             Some((cmd, _)) if cmd == "help" || cmd == "--help" || cmd == "-h" => {
@@ -210,6 +227,14 @@ fn main() {
             }
             std::process::exit(1);
         }
+        Invocation::Graph(path) => {
+            let registry = loader::load(&path).unwrap_or_else(|e| {
+                eprintln!("failed to load workflow: {e}");
+                std::process::exit(2);
+            });
+            print!("{}", graph::render(&registry));
+            std::process::exit(0);
+        }
         // Explicit help is a success: usage to stdout, exit 0.
         Invocation::Help(usage) => {
             println!("{usage}");
@@ -244,7 +269,11 @@ fn main() {
 
     // A dry run prints the plan the Kernel would execute and exits before any
     // Frame, Sink, or run/log directory is created — it must not produce a Run.
+    // The loaded root path is diagnostic value worth keeping, but only once —
+    // as this header — rather than repeated (and machine-specific) on every
+    // per-workflow line below.
     if cli.dry_run {
+        println!("root: {}", root_path(&registry));
         print!("{}", plan::describe(&registry));
         std::process::exit(0);
     }
@@ -340,6 +369,13 @@ fn env_var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 
+/// The canonical file path the registry was loaded from, recovered from
+/// `registry.root` (`<canonical path>#<name>`, see `loader::make_id`) rather
+/// than threaded separately through the `WorkflowSource` trait.
+fn root_path(registry: &Registry) -> &str {
+    registry.root.rsplit_once('#').map_or(registry.root.as_str(), |(path, _)| path)
+}
+
 // Tests for the YAML front-end live here (where the format dependency lives), not
 // in the format-agnostic Kernel.
 #[cfg(test)]
@@ -410,6 +446,26 @@ mod tests {
     fn parse_dry_run_defaults_to_false() {
         let cli = run(&["run", "wf.yaml"]);
         assert!(!cli.dry_run);
+    }
+
+    #[test]
+    fn parse_graph_takes_the_workflow_path() {
+        match Cli::parse(&args(&["graph", "wf.yaml"])) {
+            Invocation::Graph(path) => assert_eq!(path, std::path::PathBuf::from("wf.yaml")),
+            other => panic!("expected a graph invocation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_graph_without_a_positional_is_a_usage_error() {
+        assert_eq!(Cli::parse(&args(&["graph"])), Invocation::Usage(super::GRAPH_USAGE));
+    }
+
+    #[test]
+    fn parse_graph_help_flags_request_graph_usage() {
+        for flag in ["--help", "-h"] {
+            assert_eq!(Cli::parse(&args(&["graph", flag])), Invocation::Help(super::GRAPH_USAGE));
+        }
     }
 
     #[test]

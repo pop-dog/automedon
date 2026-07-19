@@ -5,6 +5,9 @@
 
 use kernel::{GateTarget, Registry, StepBody, Workflow, DEFAULT_BUDGET};
 
+use crate::display_id::display_id;
+use crate::graph::gate_key_str;
+
 /// The effective Budget for `step` in `workflow`, after the cascade (Step
 /// value -> Workflow `default_budget` -> [`DEFAULT_BUDGET`]).
 fn effective_budget(workflow: &Workflow, step: &kernel::Step) -> u32 {
@@ -51,14 +54,18 @@ fn worst_case_of(registry: &Registry, id: &str, path: &mut Vec<String>) -> Optio
 
 /// A human-readable rendering of the registry's topology: every Workflow's
 /// Steps, each Step's Gates with their `when` annotations, and effective
-/// Budgets — everything `run --dry-run` shows in place of executing.
+/// Budgets — everything `run --dry-run` shows in place of executing. Per-
+/// workflow lines use display ids (see [`crate::display_id`]), not the
+/// loader's absolute-path-bearing ids; the caller is responsible for printing
+/// the loaded root path once, elsewhere, if that diagnostic is wanted.
 pub fn describe(registry: &Registry) -> String {
     let mut out = String::new();
     let mut ids: Vec<&String> = registry.workflows.keys().collect();
     ids.sort();
     for id in ids {
         let workflow = &registry.workflows[id];
-        out.push_str(&format!("workflow {id} (entry: {})\n", workflow.entry));
+        let display = display_id(id, &registry.root);
+        out.push_str(&format!("workflow {display} (entry: {})\n", workflow.entry));
         let mut names: Vec<&String> = workflow.steps.keys().collect();
         names.sort();
         for name in names {
@@ -70,8 +77,9 @@ pub fn describe(registry: &Registry) -> String {
                     GateTarget::Exit(c) => format!("exit {c}"),
                 };
                 match &gate.when {
-                    Some(when) => out.push_str(&format!("    {:?} -> {target}  # {when}\n", gate.key)),
-                    None => out.push_str(&format!("    {:?} -> {target}\n", gate.key)),
+                    Some(when) => out
+                        .push_str(&format!("    {} -> {target}  # {when}\n", gate_key_str(&gate.key))),
+                    None => out.push_str(&format!("    {} -> {target}\n", gate_key_str(&gate.key))),
                 }
             }
         }
