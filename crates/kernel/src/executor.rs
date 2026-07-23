@@ -12,11 +12,22 @@ use std::thread;
 
 use crate::{RoutingContract, Sink, Stream};
 
+/// The leaf Step's per-spawn inputs, projected from the `Step` at the call site
+/// (`run.rs`) rather than handing the whole `Step` across the seam — routing
+/// fields like `gates`/`budget` are none of an executor's business. `env` is the
+/// author's `env:` overlay (`Step::env`), computed fresh for each call: it must
+/// never be merged into an implementor's own Run-constant state, or a later
+/// Step would inherit an earlier one's variables.
+pub struct StepSpawn<'a> {
+    pub command: &'a str,
+    pub env: &'a [(String, String)],
+}
+
 /// Runs one leaf Step's command and reports back its outcome. The whole Step ABI
 /// ("a Step is any process that exits with an integer") lives behind
 /// this single method; `run` never spawns a process itself. Only leaf
 /// (`StepBody::Command`) Steps reach an executor — Composite Steps are run by the
-/// engine's Frame stack, never here — so the seam takes the command, not the Step.
+/// engine's Frame stack, never here.
 ///
 /// The Sink is passed in by `&mut` rather than carried across threads: it is not
 /// `Send`, so an executor that fans output out over worker threads must funnel
@@ -26,7 +37,7 @@ use crate::{RoutingContract, Sink, Stream};
 pub trait StepExecutor {
     fn execute(
         &mut self,
-        command: &str,
+        spawn: &StepSpawn,
         in_message: &[u8],
         name: &str,
         activation: u32,
@@ -68,7 +79,7 @@ impl StepExecutor for SubprocessExecutor {
     /// opaquely.
     fn execute(
         &mut self,
-        command: &str,
+        spawn: &StepSpawn,
         in_message: &[u8],
         name: &str,
         activation: u32,
@@ -81,16 +92,22 @@ impl StepExecutor for SubprocessExecutor {
         let gates = serde_json::to_string(contract).expect("routing contract should serialise");
         let mut child = Command::new("sh")
             .arg("-c")
-            .arg(command)
-            // Layer the Step environment over the inherited env; `envs` adds to
-            // (does not clear) what the child would inherit.
+            .arg(spawn.command)
+            // Layered lowest to highest: inherited shell env (implicit) -> the
+            // author's `env:` -> the engine's own Run-constant members -> the
+            // per-spawn routing contract. Each `.env`/`.envs` call overrides any
+            // same-named variable set by an earlier one, so this call order *is*
+            // the documented precedence; `AUTOMEDON_` is a reserved author-key
+            // prefix (rejected at load), so `spawn.env` and `self.env` never
+            // collide in practice.
+            .envs(spawn.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .envs(self.env.iter().map(|(k, v)| (k, v.as_os_str())))
             .env("AUTOMEDON_GATES", &gates)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .unwrap_or_else(|e| panic!("failed to spawn step command {command:?}: {e}"));
+            .unwrap_or_else(|e| panic!("failed to spawn step command {:?}: {e}", spawn.command));
 
         // All three pipes must be serviced concurrently: stdin is fed from its own
         // thread while two reader threads drain stdout/stderr. Writing stdin to
@@ -161,7 +178,7 @@ fn pipe_reader(
 mod tests {
     use std::path::PathBuf;
 
-    use super::SubprocessExecutor;
+    use super::{StepSpawn, SubprocessExecutor};
     use crate::ir::{Gate, GateKey, GateTarget, Step, StepBody};
     use crate::{Event, RoutingContract, Sink, StepExecutor};
 
@@ -189,12 +206,13 @@ mod tests {
                 gate(GateKey::Code(1), Some("revise")),
                 gate(GateKey::Default, Some("escalate")),
             ],
+            env: vec![],
         };
         let contract = RoutingContract::from_step(&step);
 
         let mut exec = SubprocessExecutor::new();
-        let (code, out) =
-            exec.execute("printf '%s' \"$AUTOMEDON_GATES\"", &[], "s", 0, &contract, &mut NullSink);
+        let spawn = StepSpawn { command: "printf '%s' \"$AUTOMEDON_GATES\"", env: &[] };
+        let (code, out) = exec.execute(&spawn, &[], "s", 0, &contract, &mut NullSink);
         assert_eq!(code, 0);
 
         let parsed: Vec<(String, Option<String>)> = serde_json::from_slice::<Vec<RoutingEntryWire>>(&out)
@@ -228,15 +246,43 @@ mod tests {
             ("AUTOMEDON_WORKFLOW_DIR".to_string(), PathBuf::from("/wf")),
             ("AUTOMEDON_RUN_DIR".to_string(), PathBuf::from("/tmp/automedon/runs/abc")),
         ]);
-        let (code, out) = exec.execute(
-            "printf '%s|%s' \"$AUTOMEDON_WORKFLOW_DIR\" \"$AUTOMEDON_RUN_DIR\"",
-            &[],
-            "s",
-            0,
-            &RoutingContract::default(),
-            &mut NullSink,
-        );
+        let spawn = StepSpawn {
+            command: "printf '%s|%s' \"$AUTOMEDON_WORKFLOW_DIR\" \"$AUTOMEDON_RUN_DIR\"",
+            env: &[],
+        };
+        let (code, out) =
+            exec.execute(&spawn, &[], "s", 0, &RoutingContract::default(), &mut NullSink);
         assert_eq!(code, 0);
         assert_eq!(out, b"/wf|/tmp/automedon/runs/abc");
+    }
+
+    #[test]
+    fn author_env_is_injected_as_a_real_environment_variable() {
+        // An author `env:` value rides into the child exactly like the engine's
+        // own members, so a Step's command can read a knob the Workflow author
+        // set for it alone.
+        let mut exec = SubprocessExecutor::new();
+        let env = vec![("CODER_COMMIT_MODEL".to_string(), "sonnet".to_string())];
+        let spawn = StepSpawn { command: "printf '%s' \"$CODER_COMMIT_MODEL\"", env: &env };
+        let (code, out) =
+            exec.execute(&spawn, &[], "s", 0, &RoutingContract::default(), &mut NullSink);
+        assert_eq!(code, 0);
+        assert_eq!(out, b"sonnet");
+    }
+
+    #[test]
+    fn author_env_overrides_an_inherited_shell_value_of_the_same_name() {
+        // Precedence: inherited shell env < author `env:` < engine `AUTOMEDON_*`.
+        // The author's value must win over whatever the launching shell already
+        // exported under the same name.
+        std::env::set_var("AO_TEST_PRECEDENCE", "inherited");
+        let mut exec = SubprocessExecutor::new();
+        let env = vec![("AO_TEST_PRECEDENCE".to_string(), "author".to_string())];
+        let spawn = StepSpawn { command: "printf '%s' \"$AO_TEST_PRECEDENCE\"", env: &env };
+        let (code, out) =
+            exec.execute(&spawn, &[], "s", 0, &RoutingContract::default(), &mut NullSink);
+        std::env::remove_var("AO_TEST_PRECEDENCE");
+        assert_eq!(code, 0);
+        assert_eq!(out, b"author");
     }
 }

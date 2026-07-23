@@ -55,6 +55,8 @@ workflows:
         # current branch. Never pushes. The diff it commits is the exact tree the
         # `code` Step already built and tested, so it does not re-verify.
         command: "$AUTOMEDON_WORKFLOW_DIR/coder/commit.sh"
+        env:
+          CODER_COMMIT_MODEL: haiku
         budget: 1
         gates:
           - key: 0

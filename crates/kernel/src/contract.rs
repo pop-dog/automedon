@@ -81,6 +81,7 @@ mod tests {
                 gate(GateKey::Exhausted, None),
                 gate(GateKey::Fault, None),
             ],
+            env: vec![],
         };
 
         let contract = RoutingContract::from_step(&step);

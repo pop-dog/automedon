@@ -483,6 +483,64 @@ workflows:
     }
 
     #[test]
+    fn env_on_a_composite_step_is_a_load_error() {
+        // `env:` only means anything on a leaf: a Composite Step spawns no
+        // process. `automedon run` and `automedon validate` both go through
+        // `load`, so rejecting it here is enough for both to observe it.
+        let dir = TempDir::new("composite-env");
+        let wf = dir.write(
+            "wf.yaml",
+            r#"
+root: main
+workflows:
+  main:
+    entry: call
+    steps:
+      call:
+        workflow: child
+        env:
+          FOO: bar
+        gates:
+          - { key: 0, target: { exit: 0 } }
+  child:
+    entry: work
+    steps:
+      work:
+        command: "exit 0"
+        gates:
+          - { key: 0, target: { exit: 0 } }
+"#,
+        );
+
+        let err = load(&wf).unwrap_err().to_string();
+        assert!(err.contains("workflow:"), "error should explain the leaf-only rule: {err}");
+    }
+
+    #[test]
+    fn an_automedon_prefixed_env_key_is_a_load_error() {
+        let dir = TempDir::new("reserved-prefix");
+        let wf = dir.write(
+            "wf.yaml",
+            r#"
+root: main
+workflows:
+  main:
+    entry: a
+    steps:
+      a:
+        command: "exit 0"
+        env:
+          AUTOMEDON_FOO: bar
+        gates:
+          - { key: 0, target: { exit: 0 } }
+"#,
+        );
+
+        let err = load(&wf).unwrap_err().to_string();
+        assert!(err.contains("AUTOMEDON_"), "error should name the reserved prefix: {err}");
+    }
+
+    #[test]
     fn a_path_to_a_file_with_an_absent_root_is_a_load_error() {
         // The child file's `root:` names a Workflow not in its `workflows:` map, so
         // the by-path reference cannot bind. This is caught at load with the

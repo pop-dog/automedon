@@ -18,7 +18,7 @@ mod run;
 
 pub use contract::{RoutingContract, RoutingEntry};
 pub use event::{Event, Fault};
-pub use executor::{StepExecutor, SubprocessExecutor};
+pub use executor::{StepExecutor, StepSpawn, SubprocessExecutor};
 pub use ir::{
     Gate, GateKey, GateTarget, Registry, Step, StepBody, Workflow, WorkflowId, DEFAULT_BUDGET,
 };
