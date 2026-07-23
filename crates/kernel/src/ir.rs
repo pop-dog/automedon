@@ -191,7 +191,8 @@ impl<'de> Deserialize<'de> for RawEnv {
 }
 
 /// One `env:` value, coerced to its canonical string form (`1` -> `"1"`,
-/// `true` -> `"true"`). A sequence or map value fails to deserialize.
+/// `true` -> `"true"`). A sequence, map, or null value fails to deserialize; an
+/// empty value must be written explicitly as `""`.
 struct EnvScalar(String);
 
 impl<'de> Deserialize<'de> for EnvScalar {
@@ -230,6 +231,16 @@ impl<'de> Deserialize<'de> for EnvScalar {
 
             fn visit_string<E>(self, v: String) -> Result<Self::Value, E> {
                 Ok(EnvScalar(v))
+            }
+
+            // A bare `X:` (YAML null) has no canonical string form and is far
+            // more often an unfinished edit than a deliberate empty, so reject
+            // it rather than guess; an intentional empty value says so with `""`.
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Err(E::custom("env value is null; write \"\" for an empty string"))
             }
         }
 
@@ -332,6 +343,24 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("scalar"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn a_null_env_value_is_a_load_error() {
+        let err = serde_json::from_str::<Step>(
+            r#"{"command": "noop", "gates": [], "env": {"BAD": null}}"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("null"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn an_explicit_empty_string_env_value_is_accepted() {
+        let step: Step = serde_json::from_str(
+            r#"{"command": "noop", "gates": [], "env": {"EMPTY": ""}}"#,
+        )
+        .unwrap();
+        assert_eq!(step.env, vec![("EMPTY".to_string(), String::new())]);
     }
 
     #[test]
