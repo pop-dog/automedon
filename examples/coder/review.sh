@@ -9,8 +9,8 @@
 # through the Default (escalate) instead of advancing un-reviewed code.
 #
 # Knobs: CODER_STUB=1 keeps the Step inert (CODER_STUB_REVIEW picks the stubbed
-# outcome); CODER_REVIEW_MODEL picks the `claude` model — opus by default, since
-# judging a diff warrants the strongest reviewer.
+# outcome); model picks the `claude` model — opus by default, since judging a
+# diff warrants the strongest reviewer.
 set -u
 
 # Orchestration scratch lives in the ephemeral Run Directory the engine provides,
@@ -56,7 +56,7 @@ task="$(llm_render "${0%/*}/prompts/review.md" \
 # would block the skill. Its deny rules still hold the line that matters: review
 # may read freely and write its findings, but cannot edit crate source or stage,
 # commit, or push — so no review-introduced change can advance un-reviewed.
-reply="$(claude --settings "${0%/*}/review.permissions.json" --model "${CODER_REVIEW_MODEL:-opus}" -p "$task" 2>/dev/null)"
+reply="$(claude --settings "${0%/*}/review.permissions.json" --model "${model:-opus}" -p "$task" 2>/dev/null)"
 
 # Re-emit the path (the out-Message) before mapping the verdict. llm_parse is
 # stdout-silent and exits with the chosen Gate key, failing closed to the Default

@@ -53,6 +53,8 @@ workflows:
 
       create-pr:
         command: "$AUTOMEDON_WORKFLOW_DIR/autocoder/create-pr.sh"
+        env:
+          model: sonnet
         budget: 1
         gates:
           - key: 0
@@ -72,6 +74,8 @@ workflows:
         # recovery, the branch name of a worktree already staged for this
         # issue).
         command: "$AUTOMEDON_WORKFLOW_DIR/autocoder/distill.sh"
+        env:
+          model: opus
         budget: 1
         gates:
           - key: 0
