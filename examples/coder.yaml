@@ -51,9 +51,9 @@ workflows:
             when: develop escalated (build failed or review did not converge) — escalate
 
       commit:
-        # Writes a commit message from `git diff` + TASK.md and commits on the
-        # current branch. Never pushes. The diff it commits is the exact tree the
-        # `code` Step already built and tested, so it does not re-verify.
+        # Stages and commits the exact tree `code` built and tested, so it does
+        # not re-verify. Never pushes. The script owns staging so new files are
+        # committed as reliably as edits; the agent only writes the message.
         command: "$AUTOMEDON_WORKFLOW_DIR/coder/commit.sh"
         env:
           model: haiku
