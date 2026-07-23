@@ -43,6 +43,12 @@ pub struct Step {
     pub budget: Option<u32>,
     /// Outgoing Gates. Each key unlocks at most one Gate.
     pub gates: Vec<Gate>,
+    /// Author-declared per-spawn environment, in declaration order. Leaf-only
+    /// (rejected at load on a Composite Step) and distinct from the
+    /// `PathBuf`-valued, Run-constant environment `SubprocessExecutor` carries —
+    /// this is computed fresh for each spawn and never touches the orchestrator's
+    /// own process environment.
+    pub env: Vec<(String, String)>,
 }
 
 /// What a Step does. A leaf `Command` runs via the executor; a `Workflow`
@@ -113,6 +119,8 @@ impl<'de> Deserialize<'de> for Step {
             budget: Option<u32>,
             #[serde(default)]
             gates: Vec<Gate>,
+            #[serde(default)]
+            env: Option<RawEnv>,
         }
         let raw = Raw::deserialize(d)?;
         let body = match (raw.command, raw.workflow) {
@@ -124,7 +132,108 @@ impl<'de> Deserialize<'de> for Step {
                 ))
             }
         };
-        Ok(Step { body, budget: raw.budget, gates: raw.gates })
+        let env = raw.env.map(|e| e.0).unwrap_or_default();
+        // A Composite Step spawns no process, so `env:` there could only mean
+        // implicit propagation to the child Frame — nothing needs that, and
+        // silently ignoring the field would hide a likely author mistake.
+        if matches!(body, StepBody::Workflow(_)) && !env.is_empty() {
+            return Err(de::Error::custom(
+                "`env:` is only valid on a `command:` step; a `workflow:` step spawns no process",
+            ));
+        }
+        for (key, _) in &env {
+            if key.starts_with("AUTOMEDON_") {
+                return Err(de::Error::custom(format!(
+                    "step env key {key:?} uses the reserved `AUTOMEDON_` prefix"
+                )));
+            }
+        }
+        Ok(Step { body, budget: raw.budget, gates: raw.gates, env })
+    }
+}
+
+/// The raw `env:` map as written in the Workflow file: any YAML scalar value is
+/// accepted and stringified in its canonical form; a sequence or map value is a
+/// load-time error. A hand-written `Deserialize` (rather than
+/// `HashMap<String, EnvScalar>`) so declaration order survives into the `Vec` —
+/// the Kernel is format-agnostic, so this reads through serde's generic map
+/// visitor rather than a YAML-specific `Value`.
+struct RawEnv(Vec<(String, String)>);
+
+impl<'de> Deserialize<'de> for RawEnv {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct EnvVisitor;
+
+        impl<'de> de::Visitor<'de> for EnvVisitor {
+            type Value = RawEnv;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a map of environment variable names to scalar values")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let mut entries = Vec::new();
+                while let Some((key, EnvScalar(value))) = map.next_entry()? {
+                    entries.push((key, value));
+                }
+                Ok(RawEnv(entries))
+            }
+        }
+
+        d.deserialize_map(EnvVisitor)
+    }
+}
+
+/// One `env:` value, coerced to its canonical string form (`1` -> `"1"`,
+/// `true` -> `"true"`). A sequence or map value fails to deserialize.
+struct EnvScalar(String);
+
+impl<'de> Deserialize<'de> for EnvScalar {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ScalarVisitor;
+
+        impl<'de> de::Visitor<'de> for ScalarVisitor {
+            type Value = EnvScalar;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a scalar (string, integer, float, or bool)")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(EnvScalar(v.to_string()))
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(EnvScalar(v.to_string()))
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(EnvScalar(v.to_string()))
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(EnvScalar(v.to_string()))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(EnvScalar(v.to_string()))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E> {
+                Ok(EnvScalar(v))
+            }
+        }
+
+        d.deserialize_any(ScalarVisitor)
     }
 }
 
@@ -176,5 +285,83 @@ impl<'de> Deserialize<'de> for GateKey {
                 ))),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Step, StepBody};
+
+    #[test]
+    fn author_env_round_trips_in_declaration_order() {
+        let step: Step = serde_json::from_str(
+            r#"{"command": "noop", "gates": [], "env": {"FIRST": "a", "SECOND": "b"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            step.env,
+            vec![("FIRST".to_string(), "a".to_string()), ("SECOND".to_string(), "b".to_string())]
+        );
+    }
+
+    #[test]
+    fn integer_and_bool_scalars_are_stringified() {
+        let step: Step = serde_json::from_str(
+            r#"{"command": "noop", "gates": [], "env": {"N": 1, "B": true}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            step.env,
+            vec![("N".to_string(), "1".to_string()), ("B".to_string(), "true".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_sequence_env_value_is_a_load_error() {
+        let err = serde_json::from_str::<Step>(
+            r#"{"command": "noop", "gates": [], "env": {"BAD": [1, 2]}}"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("scalar"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn a_map_env_value_is_a_load_error() {
+        let err = serde_json::from_str::<Step>(
+            r#"{"command": "noop", "gates": [], "env": {"BAD": {"nested": 1}}}"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("scalar"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn env_on_a_workflow_step_is_a_load_error() {
+        let err = serde_json::from_str::<Step>(
+            r#"{"workflow": "child", "gates": [], "env": {"X": "1"}}"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("workflow"),
+            "expected the error to explain the leaf-only rule: {err}"
+        );
+    }
+
+    #[test]
+    fn an_automedon_prefixed_key_is_a_load_error() {
+        let err = serde_json::from_str::<Step>(
+            r#"{"command": "noop", "gates": [], "env": {"AUTOMEDON_FOO": "1"}}"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("AUTOMEDON_"),
+            "expected the error to name the reserved prefix: {err}"
+        );
+    }
+
+    #[test]
+    fn env_is_optional_and_defaults_to_empty() {
+        let step: Step = serde_json::from_str(r#"{"command": "noop", "gates": []}"#).unwrap();
+        assert!(step.env.is_empty());
+        assert!(matches!(step.body, StepBody::Command(_)));
     }
 }

@@ -128,6 +128,19 @@ _Avoid_: Scratch dir (informal), temp dir, log dir (that is the separate durable
 The ambient, read-only context the [[Step Executor]] establishes for every Step before running it. Its *broadcast* members are constant across the whole Run and identical for every Step, so the engine broadcasts them rather than passing them Step-to-Step like a [[Message]] — a fourth channel alongside control (the exit code), data (the Message), and output (Step output to the [[Sink]]). These members are `$AUTOMEDON_WORKFLOW_DIR` (where the Workflow's scripts live) and `$AUTOMEDON_RUN_DIR` (the [[Run Directory]]). The subprocess Executor realises them as environment variables inherited by each `sh -c` child; the [[Kernel]] never sees them — it is the Executor adapter's concern, like Run identity is the orchestrator's. Distinct from the per-Step [[Routing contract]], which the same Executor injects but which varies Step-to-Step.
 _Avoid_: Env, globals, config, ambient state.
 
+**Step `env:`**:
+An author-declared, per-Step overlay onto the [[Step environment]]: plain
+`name: value` pairs written next to a leaf Step in the Workflow file, injected
+as real environment variables into that Step's own spawn only. Unlike the
+broadcast members, it varies Step-to-Step and is never propagated to a
+Composite Step's child Frame (`env:` there is a load error — a Composite
+spawns no process to inject into). Precedence low to high: the inherited
+shell env, then this author overlay, then the engine's own `AUTOMEDON_*`
+members (a reserved key prefix, rejected at load). A per-spawn overlay only —
+never written back into the orchestrator's own process environment or reused
+across spawns.
+_Avoid_: Step config, step-level env vars (redundant with the entry name).
+
 **Routing contract**:
 The Executor-injected, *per-Step* description of how the Step's own exit code will be routed — its `Code` and `Default` [[Gate]]s as `{ key, when }` pairs (no targets, no `EXHAUSTED`/`FAULT`). A generic, [[Kernel]]-owned capability ("here is how your exit code routes"), *not* an LLM feature: the engine never learns what an LLM is. The subprocess Executor serialises it to `$AUTOMEDON_GATES` (JSON); its first consumer is an example LLM helper script a Step sources, which turns the contract into a prompt and parses the reply back into a key. Distinct from the broadcast [[Step environment]] in that it varies Step-to-Step.
 _Avoid_: Gate table dump, prompt spec, env (it is not part of the broadcast environment).

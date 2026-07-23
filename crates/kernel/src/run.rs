@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::event::{Event, Fault};
 use crate::ir::{Gate, GateKey, GateTarget, Registry, Step, StepBody, Workflow, DEFAULT_BUDGET};
-use crate::{RoutingContract, Sink, StepExecutor};
+use crate::{RoutingContract, Sink, StepExecutor, StepSpawn};
 
 /// Hardcoded max-Depth default, mirroring [`DEFAULT_BUDGET`].
 pub const DEFAULT_MAX_DEPTH: u32 = 10;
@@ -158,8 +158,9 @@ fn run_frame(
                     // Project the leaf's routing contract once and hand it across
                     // the seam: "here is how your exit code will be routed."
                     let contract = RoutingContract::from_step(step);
+                    let spawn = StepSpawn { command, env: &step.env };
                     let (code, out) =
-                        executor.execute(command, &message, current, activation, &contract, sink);
+                        executor.execute(&spawn, &message, current, activation, &contract, sink);
                     sink.emit(&Event::StepExited { step: current.to_string(), code });
                     message = out;
                     match route(step, code) {
@@ -263,7 +264,7 @@ mod tests {
     use super::{run, RunConfig};
     use crate::event::{Event, Fault};
     use crate::ir::{Gate, GateKey, GateTarget, Registry, Step, StepBody, Workflow, DEFAULT_BUDGET};
-    use crate::{RoutingContract, Sink, StepExecutor, Stream, SubprocessExecutor};
+    use crate::{RoutingContract, Sink, StepExecutor, StepSpawn, Stream, SubprocessExecutor};
 
     /// A Sink that records every emitted Event and every output chunk for
     /// inspection.
@@ -316,7 +317,7 @@ mod tests {
     impl StepExecutor for CannedExecutor {
         fn execute(
             &mut self,
-            _command: &str,
+            _spawn: &StepSpawn,
             _in_message: &[u8],
             name: &str,
             activation: u32,
@@ -340,13 +341,29 @@ mod tests {
     }
 
     fn step(command: &str, budget: Option<u32>, gates: Vec<Gate>) -> Step {
-        Step { body: StepBody::Command(command.into()), budget, gates }
+        Step { body: StepBody::Command(command.into()), budget, gates, env: vec![] }
+    }
+
+    /// A leaf Step carrying an author `env:` overlay, otherwise identical to
+    /// [`step`].
+    fn step_with_env(
+        command: &str,
+        env: Vec<(&str, &str)>,
+        budget: Option<u32>,
+        gates: Vec<Gate>,
+    ) -> Step {
+        Step {
+            body: StepBody::Command(command.into()),
+            budget,
+            gates,
+            env: env.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        }
     }
 
     /// A Composite Step: enter the named child Workflow, with `gates` routing its
     /// surfaced exit code (or, via a FAULT Gate, its Fault).
     fn composite(child: &str, budget: Option<u32>, gates: Vec<Gate>) -> Step {
-        Step { body: StepBody::Workflow(child.into()), budget, gates }
+        Step { body: StepBody::Workflow(child.into()), budget, gates, env: vec![] }
     }
 
     fn workflow(entry: &str, default_budget: Option<u32>, steps: Vec<(&str, Step)>) -> Workflow {
@@ -892,6 +909,40 @@ mod tests {
         let mut exec = SubprocessExecutor::new();
         let mut sink = MockSink::default();
         assert_eq!(run(&reg, b"5", &RunConfig::default(), &mut exec, &mut sink).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_steps_env_does_not_leak_into_a_sibling_steps_spawn() {
+        // `first` declares `env:`; `second` reads the same name back. The
+        // per-Step env is a per-spawn overlay computed fresh for each `execute`
+        // call, so it must not bleed from one Step's spawn into the next's.
+        let wf = workflow(
+            "first",
+            None,
+            vec![
+                (
+                    "first",
+                    step_with_env(
+                        "exit 0",
+                        vec![("AO_TEST_LEAK", "from-first")],
+                        None,
+                        vec![gate(GateKey::Code(0), GateTarget::Step("second".into()))],
+                    ),
+                ),
+                (
+                    "second",
+                    step(
+                        "printf '%s' \"${AO_TEST_LEAK:-unset}\"",
+                        None,
+                        vec![gate(GateKey::Code(0), GateTarget::Exit(0))],
+                    ),
+                ),
+            ],
+        );
+        let mut exec = SubprocessExecutor::new();
+        let mut sink = MockSink::default();
+        drive(wf, &[], &mut exec, &mut sink).unwrap();
+        assert_eq!(captured(&sink, "second", Stream::Stdout), b"unset");
     }
 
     #[test]
