@@ -10,8 +10,8 @@
 # catch a failure — but the deterministic gate is what the kernel routes on.
 #
 # Knobs: CODER_STUB=1 keeps the Step inert (CODER_STUB_CODE sets its exit code);
-# CODER_CODE_MODEL picks the `claude` model — sonnet by default, matched to the
-# bulk coding work this Step does.
+# model picks the `claude` model — sonnet by default, matched to the bulk
+# coding work this Step does.
 set -u
 
 # Orchestration scratch lives in the ephemeral Run Directory the engine provides,
@@ -65,7 +65,7 @@ prompt="$(llm_render "${0%/*}/prompts/code.md" \
 # Steps, this Step edits source and drives the /tdd skill, so its toolset is too
 # broad to allowlist; it is isolated by running against a throwaway branch/working
 # copy instead.
-claude --dangerously-skip-permissions --model "${CODER_CODE_MODEL:-sonnet}" -p "$prompt" 1>&2
+claude --dangerously-skip-permissions --model "${model:-sonnet}" -p "$prompt" 1>&2
 code=$?
 
 # A non-zero exit is the agent/CLI failing to run, not a build result (the

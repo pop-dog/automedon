@@ -5,8 +5,8 @@
 # the caller.
 #
 # Knobs: CODER_STUB=1 keeps the Step inert (CODER_STUB_PR_CODE sets its exit
-# code); CODER_PR_MODEL picks the `claude` model — sonnet by default, enough
-# for pushing and writing a PR description.
+# code); model picks the `claude` model — sonnet by default, enough for
+# pushing and writing a PR description.
 set -u
 
 : "${AUTOMEDON_RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
@@ -33,7 +33,7 @@ prompt="$(llm_render "${0%/*}/prompts/create-pr.md" TASK_FILE="$task_path")" || 
 # rules hold the line that matters: it may push the current branch and open
 # or edit a PR, but cannot force-push, delete a remote branch, or merge,
 # close, or review the PR it just opened.
-claude --settings "${0%/*}/create-pr.permissions.json" --model "${CODER_PR_MODEL:-sonnet}" -p "$prompt" 1>&2
+claude --settings "${0%/*}/create-pr.permissions.json" --model "${model:-sonnet}" -p "$prompt" 1>&2
 code=$?
 
 printf '%s' "$task_path"

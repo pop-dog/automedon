@@ -15,9 +15,9 @@
 #
 # Knobs: CODER_STUB=1 keeps the Step inert (CODER_STUB_DISTILL_CODE sets its
 # exit code; the stub emits the fixed branch name `stub/0-task`, not its
-# in-Message, since there is no real issue to distill); CODER_DISTILL_MODEL
-# picks the `claude` model — opus by default, since turning a raw issue into
-# a concrete spec is a judgement call worth the strongest model.
+# in-Message, since there is no real issue to distill); model picks the
+# `claude` model — opus by default, since turning a raw issue into a concrete
+# spec is a judgement call worth the strongest model.
 set -u
 
 : "${AUTOMEDON_RUN_DIR:?must be set by the orchestrator (the ephemeral Run Directory)}"
@@ -59,7 +59,7 @@ prompt="$(llm_render "${0%/*}/prompts/distill.md" \
 # scratch under $AUTOMEDON_RUN_DIR, so --dangerously-skip-permissions (as
 # code.sh uses) is simpler here than a policy file scoped to a path that
 # does not exist until run time.
-reply="$(claude --dangerously-skip-permissions --model "${CODER_DISTILL_MODEL:-opus}" -p "$prompt" 2>/dev/null)"
+reply="$(claude --dangerously-skip-permissions --model "${model:-opus}" -p "$prompt" 2>/dev/null)"
 
 # On recovery the branch already exists, so the agent's BRANCH suggestion is
 # ignored in favor of the one the worktree is on — the spec is refreshed, the

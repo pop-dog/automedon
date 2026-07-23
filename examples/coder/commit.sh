@@ -3,8 +3,8 @@
 # the diff and the task, and commit on the current branch. Never pushes — a
 # human is responsible for being on a sensible branch. Re-emits the path.
 #
-# Knobs: CODER_STUB=1 keeps the Step inert; CODER_COMMIT_MODEL picks the
-# `claude` model — haiku by default, enough for writing a commit message.
+# Knobs: CODER_STUB=1 keeps the Step inert; model picks the `claude` model —
+# haiku by default, enough for writing a commit message.
 set -u
 
 # Orchestration scratch lives in the ephemeral Run Directory the engine provides,
@@ -39,7 +39,7 @@ prompt="$(llm_render "${0%/*}/prompts/commit.md" TASK_FILE="$task_path")" || exi
 # hang on) while its deny rules still enforce the "never pushes" invariant — a
 # denied tool cannot be re-allowed by anything the agent does. The narrow git
 # toolset here keeps that allowlist short; the broad code Step cannot.
-claude --settings "${0%/*}/commit.permissions.json" --model "${CODER_COMMIT_MODEL:-haiku}" -p "$prompt" 1>&2
+claude --settings "${0%/*}/commit.permissions.json" --model "${model:-haiku}" -p "$prompt" 1>&2
 code=$?
 
 # On a successful commit the review's findings have been addressed and approved,

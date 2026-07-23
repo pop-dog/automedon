@@ -56,7 +56,7 @@ workflows:
         # `code` Step already built and tested, so it does not re-verify.
         command: "$AUTOMEDON_WORKFLOW_DIR/coder/commit.sh"
         env:
-          CODER_COMMIT_MODEL: haiku
+          model: haiku
         budget: 1
         gates:
           - key: 0
@@ -79,6 +79,8 @@ workflows:
         # The single re-entry point of the loop: both a red build and a Blocking
         # review route back here, sharing this Budget.
         command: "$AUTOMEDON_WORKFLOW_DIR/coder/code.sh"
+        env:
+          model: sonnet
         budget: 3
         gates:
           - key: 0
@@ -111,6 +113,8 @@ workflows:
         # On approval it traverses the sub-Workflow's Exit Gate, surfacing exit 0
         # to the parent `develop` Step, which routes on to commit.
         command: "$AUTOMEDON_WORKFLOW_DIR/coder/review.sh"
+        env:
+          model: opus
         gates:
           - key: 0
             target: { exit: 0 }
